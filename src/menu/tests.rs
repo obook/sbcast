@@ -85,6 +85,8 @@ fn draws_and_applies_presets() {
     }
     let text = screen.concat();
     assert!(text.contains("Room 104") && text.contains("Default") && text.contains("Audio delay"));
+    // The key help fits in 80 columns during a cast.
+    assert!(text.contains("s stop") && text.contains("q quit"));
     assert!(text.contains("00:12:34") && text.contains("Bitrate"));
 
     // SBCAST_SCREENSHOT=file.html cargo test draws: the same screen as a colored page, for media/.

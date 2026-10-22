@@ -64,6 +64,8 @@ sbcast cast --host 10.0.0.7:7385  # panel by its address and command port
 sbcast pin 0A1B2C                 # the address a code gives, without connecting
 ```
 
+![The sbcast menu during a cast](media/menu.png)
+
 Each cast first opens the screen dialog, then a second dialog that allows
 remote control: the panel's touches move the pointer on the shared screen.
 Share a whole screen: with a single window, touchback stays off. Outside

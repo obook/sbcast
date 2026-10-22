@@ -131,8 +131,8 @@ impl Menu {
     }
 
     fn draw_keys(&self, f: &mut Frame, area: ratatui::layout::Rect) {
-        let mut keys =
-            vec![("↑↓", "move"), ("←→", "change"), ("Tab", "switch"), ("r", "rescan"), ("p", "screen"), ("c", "enter code"), ("Enter", "cast")];
+        // Short words: the whole line, q included, must fit in 80 columns.
+        let mut keys = vec![("↑↓", "move"), ("←→", "set"), ("Tab", "pane"), ("r", "scan"), ("p", "screen"), ("c", "code"), ("↵", "cast")];
         if self.casting.is_some() {
             keys.push(("s", "stop"));
         }
