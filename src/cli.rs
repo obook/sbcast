@@ -45,6 +45,9 @@ pub enum Command {
         /// (unverified on a real panel).
         #[arg(long)]
         pin: Option<String>,
+        /// Name the panel shows when it asks to accept this PC.
+        #[arg(long, default_value = "PC guest")]
+        name: String,
         #[command(flatten)]
         stream: Stream,
     },

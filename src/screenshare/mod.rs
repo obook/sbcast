@@ -163,7 +163,7 @@ impl Panel<'_> {
     /// Returns the panel's version and its answer to the cast request; None at `stop`.
     fn negotiate(&self, commands: &mut Commands) -> anyhow::Result<Option<(i32, Value)>> {
         let local_ip = commands.socket.local_addr()?.ip();
-        commands.send(CONNECT, &connect_request(self.settings.pin.as_deref(), local_ip))?;
+        commands.send(CONNECT, &connect_request(&self.settings.name, self.settings.pin.as_deref(), local_ip))?;
         tracing::info!(host = %self.host, "waiting for approval on the panel");
         // The menu counts down; the terminal says it once per wait.
         let countdown = |left: u64| {

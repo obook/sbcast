@@ -37,7 +37,7 @@ fn device(id: &str, name: &str) -> CastDevice {
 
 fn settings(bitrate: u32) -> Settings {
     let stream = Stream { resolution: (1920, 1080), fps: 30, bitrate, no_audio: false };
-    Settings { stream, audio_delay: 0, pin: None }
+    Settings { stream, audio_delay: 0, pin: None, name: "PC guest".into() }
 }
 
 #[test]

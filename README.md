@@ -71,6 +71,7 @@ moves the running cast to it, `q` or Ctrl+C quits.
 | `--device NAME` | | Panel name or id, found with mDNS |
 | `--pin CODE` | | The code shown on the panel: sent to the panel, and gives its address |
 | `--host IP:PORT` | | The panel's address and command port, when the code cannot give it |
+| `--name NAME` | `PC guest` | Name the panel shows when it asks to accept this PC |
 
 ## Troubleshooting
 

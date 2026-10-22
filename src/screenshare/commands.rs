@@ -167,14 +167,14 @@ impl Drop for Commands {
     }
 }
 
-/// Connect request. Both spellings of the code are sent; which fields the panel needs is
-/// unverified. Hypothesis: deviceType 5 stands for a PC (1 for a phone).
-/// The device id stays the same across reconnections and runs: derived from the machine-id,
-/// which must not leave the PC as is (systemd says so), so hashed with sbcast's name.
-pub fn connect_request(pin: Option<&str>, local_ip: IpAddr) -> Value {
+/// Connect request; the panel shows `name` when it asks to accept the PC. Both spellings of
+/// the code are sent; which fields the panel needs is unverified. Hypothesis: deviceType 5
+/// stands for a PC (1 for a phone).
+/// The device id stays the same across reconnections, runs and names: derived from the
+/// machine-id, which must not leave the PC as is (systemd says so), so hashed with sbcast's name.
+pub fn connect_request(name: &str, pin: Option<&str>, local_ip: IpAddr) -> Value {
     let read = |path| std::fs::read_to_string(path).map(|text| text.trim().to_string()).ok().filter(|text| !text.is_empty());
-    let name = read("/etc/hostname").unwrap_or_else(|| "sbcast".to_string());
-    let machine_id = read("/etc/machine-id").unwrap_or_else(|| name.clone());
+    let machine_id = read("/etc/machine-id").or_else(|| read("/etc/hostname")).unwrap_or_default();
     let uuid = format!("{:016x}", fnv1a(&format!("sbcast {machine_id}")));
     let pin = pin.unwrap_or("");
     json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
@@ -193,4 +193,19 @@ fn fnv1a(text: &str) -> u64 {
 
 fn now_ms() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sends_the_name_and_keeps_the_id() {
+        let ip = IpAddr::from([192, 168, 1, 10]);
+        let guest = connect_request("PC guest", Some("0A1B2C"), ip);
+        let other = connect_request("PC Olivier", None, ip);
+        assert_eq!(guest["deviceName"], "PC guest");
+        assert_eq!(guest["pinCode"], "0A1B2C");
+        assert_eq!(guest["deviceUuid"], other["deviceUuid"]);
+    }
 }

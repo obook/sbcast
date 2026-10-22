@@ -15,6 +15,8 @@ pub struct Settings {
     pub audio_delay: u64,
     /// Code shown on the panel (`--pin`, or typed in the menu), kept for the next casts.
     pub pin: Option<String>,
+    /// Name the panel shows when it asks to accept this PC (`--name`).
+    pub name: String,
 }
 
 /// Name, resolution, bitrate.
