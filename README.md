@@ -1,7 +1,8 @@
 # sbcast
 
-Same family: [sccast](https://github.com/obook/sccast) for Chromecast,
-[apcast](https://github.com/obook/apcast) for Apple TV.
+> [!NOTE]
+> Same family: [sccast](https://github.com/obook/sccast) for Chromecast,
+> [apcast](https://github.com/obook/apcast) for Apple TV.
 
 `sbcast` casts a Linux desktop's screen and sound to an interactive
 classroom panel, through the panel's own screen sharing receiver. The
