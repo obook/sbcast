@@ -99,8 +99,8 @@ menu.
 The panel's image stays still while you work elsewhere: you shared one
 window, not the whole screen. Press `p` in the menu to choose again.
 
-The panel is lost during a cast: sbcast connects again, up to 3 times in 5
-minutes, without limit in the menu.
+The panel is lost during a cast: sbcast connects again every 2 s, without
+limit, until you stop it. A refusal on the panel ends the cast.
 
 Logs: `RUST_LOG=sbcast=debug sbcast cast ...`. The menu always writes its
 log to `$XDG_RUNTIME_DIR/sbcast.log`, emptied at each start. Each cast also

@@ -45,39 +45,7 @@ const SILENCE: Duration = Duration::from_secs(30);
 /// While the panel still holds the lost session: a try every 5 s, for a bit more than its 30 s.
 const BUSY_RETRY: Duration = Duration::from_secs(5);
 const BUSY_WAIT: Duration = Duration::from_secs(35);
-const MAX_RECONNECTS: u32 = 3;
-/// A drop this long after the previous one starts a new count.
-const RECONNECT_WINDOW: Duration = Duration::from_secs(300);
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
-
-/// Drops of one cast: give up after MAX_RECONNECTS close together, unless `forever` (menu).
-struct Drops {
-    count: u32,
-    last: Instant,
-    forever: bool,
-}
-
-impl Drops {
-    fn new(forever: bool) -> Self {
-        Self { count: 0, last: Instant::now(), forever }
-    }
-
-    /// Count a drop of `panel`: the count to show, or an error when it is one too many.
-    fn count(&mut self, panel: &str, why: &str) -> anyhow::Result<String> {
-        if self.last.elapsed() > RECONNECT_WINDOW {
-            self.count = 0;
-        }
-        self.count += 1;
-        self.last = Instant::now();
-        if self.forever {
-            return Ok(self.count.to_string());
-        }
-        if self.count > MAX_RECONNECTS {
-            anyhow::bail!("lost {panel} ({why}), gave up after {MAX_RECONNECTS} reconnections");
-        }
-        Ok(format!("{}/{MAX_RECONNECTS}", self.count))
-    }
-}
 
 /// Check that the panel answers; return the address that did (one of the code table's ports).
 pub fn find(host: SocketAddr) -> anyhow::Result<SocketAddr> {
@@ -93,14 +61,14 @@ pub fn cast(host: SocketAddr, name: &str, s: &Settings, screen: &ScreenCast, sto
     trace::line(&format!("touchback: {}", pointer.unwrap_or_else(|| "off (pointer not granted)".into())));
     // A first failure is a wrong address or a refusal: report it.
     let mut why = panel.attempt()?;
-    // Up to 3 times in 5 min from the terminal, without limit from the menu.
-    let mut drops = Drops::new(matches!(out, Out::Menu(_)));
+    // Without limit: on a crowded school Wi-Fi the link drops often, and only stop ends a cast.
+    let mut drops = 0;
     while let Some(lost) = why {
         tracing::warn!(%lost, %host, "panel lost");
         trace::line(&format!("lost: {lost}"));
-        let count = drops.count(name, &lost)?;
+        drops += 1;
         out.send(Status::Reconnecting);
-        out.say(&format!("Lost {name} ({lost}). Reconnecting to the panel ({count})..."));
+        out.say(&format!("Lost {name} ({lost}). Reconnecting to the panel ({drops})..."));
         std::thread::sleep(RECONNECT_DELAY);
         if stop.load(Ordering::SeqCst) {
             break;

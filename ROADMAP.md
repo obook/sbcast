@@ -10,7 +10,7 @@ Done (unverified on a panel):
 - [x] Video (H.264, SPS and PPS apart) and sound (AAC with ADTS) over TCP
 - [x] Find panels with mDNS (`_sspcast._tcp`)
 - [x] Find a panel by the code it shows (`--pin`, `c` in the menu)
-- [x] Reconnect after a loss (3 times in 5 min from the terminal, no limit from the menu), each cause logged; a refusal on the panel ends the cast
+- [x] Reconnect after a loss, without limit, each cause logged; a refusal on the panel ends the cast. Checked on a fake panel that cuts every 30 s (`examples/fake_panel.rs`): back in about 4 s, video restarts on a key frame
 - [x] Bounded delay over TCP: small send buffer, drop frames until a key frame when the network falls behind, lower the bitrate
 - [x] Touchback always on: the panel's touches move the pointer through the RemoteDesktop portal
 
