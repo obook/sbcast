@@ -17,6 +17,7 @@ Done (unverified on a panel):
 To do:
 
 - [ ] Test on a real panel
+- [ ] Congested school network: the panel's own sender app often drops. At busy hours, count drops and cut lengths for that app and for sbcast on the same panel
 - [ ] Touchback on a real panel: which coordinates it sends, the wheel's direction, the UDP beat to the panel
 - [ ] SSDP discovery, only if a panel does not answer mDNS
 - [ ] Follow the panel's size and frame rate requests, and its bitrate
