@@ -4,9 +4,9 @@
 > Same family: [sccast](https://github.com/obook/sccast) for Chromecast,
 > [apcast](https://github.com/obook/apcast) for Apple TV.
 
-`sbcast` casts a Linux desktop's screen and sound to an interactive
-panel, through the panel's own screenshare receiver. The panel's touches
-come back to the PC and drive its pointer (touchback).
+`sbcast` casts a Linux desktop's screen and sound to an interactive panel
+that has a screenshare receiver. The panel's touches come back to the PC
+and drive its pointer (touchback).
 
 ## Requirements
 
