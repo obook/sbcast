@@ -38,8 +38,11 @@ To do:
 
 ## Packaging
 
+Done:
+
+- [x] First release, v0.1.0: .deb for KDE neon and Ubuntu 26.04
+
 To do:
 
-- [ ] First release: .deb for KDE neon and Ubuntu 26.04
 - [ ] On Ubuntu 26.04 (GNOME), check the screen and remote control dialogs
 - [ ] Cast for one hour without a cut

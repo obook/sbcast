@@ -17,7 +17,23 @@ come back to the PC and drive its pointer (touchback).
 - The PC and the panel on the same local network. mDNS (UDP 5353) lets
   sbcast find the panels; without it, use the code shown on the panel.
 
-## Build
+## Install
+
+Download the `.deb` for your system from the
+[latest release](https://github.com/obook/sbcast/releases/latest):
+
+- KDE neon: `sbcast_<version>-1.neon_amd64.deb`
+- Ubuntu 26.04: `sbcast_<version>-1.ubuntu26.04_amd64.deb`
+
+Then:
+
+```sh
+sudo apt install ./sbcast_*_amd64.deb
+```
+
+`apt` installs the GStreamer plugins it needs.
+
+## Build from source
 
 Debian, Ubuntu and derivatives (tested on KDE neon 24.04):
 
