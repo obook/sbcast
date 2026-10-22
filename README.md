@@ -2,7 +2,7 @@
 
 > [!NOTE]
 > Same family: [sccast](https://github.com/obook/sccast) for Chromecast,
-> [apcast](https://github.com/obook/apcast) for Apple TV.
+> [sacast](https://github.com/obook/sacast) for Apple TV.
 
 `sbcast` casts a Linux desktop's screen and sound to an interactive panel
 that has a screenshare receiver. The panel's touches come back to the PC
@@ -85,7 +85,7 @@ moves the running cast to it, `q` or Ctrl+C quits.
 | `--fps N` | `30` | Frame rate |
 | `--bitrate KBPS` | `2500` | Video bitrate in kbit/s, lowered automatically when the network falls behind |
 | `--no-audio` | | Video only |
-| `--audio-delay MS` | `0` | Delays the sound on the panel. The menu changes it during a cast |
+| `--audio-delay MS` | `0` | Delays the sound on the panel, or the image when negative. Changed in the menu (50 ms steps), it applies at the next cast |
 | `--device NAME` | | Panel name or id, found with mDNS |
 | `--pin CODE` | | The code shown on the panel: sent to the panel, and gives its address |
 | `--host IP:PORT` | | The panel's address and command port, when the code cannot give it |
