@@ -58,8 +58,6 @@ pub enum Status {
     Dropped(Arc<AtomicU64>),
     /// Frames dropped because the network did not take them in time.
     NetworkDropped(Arc<AtomicU64>),
-    /// Output of the cast's sound source: the audio delay row moves its offset live.
-    AudioPad(gstreamer::Pad),
     /// The screen picker got a new screen: the running cast restarts on it.
     ScreenPicked,
 }
@@ -81,8 +79,6 @@ pub struct Menu {
     status_tx: Sender<Status>,
     status_rx: Receiver<Status>,
     live: Live,
-    /// Sound source of the running cast, for the live audio delay.
-    audio_pad: Option<gstreamer::Pad>,
     /// Panel whose code is being typed (None: a panel not in the list, `c`), and the code so far.
     code_entry: Option<(Option<CastDevice>, String)>,
 }
@@ -112,7 +108,6 @@ impl Menu {
             status_tx,
             status_rx,
             live: Live::default(),
-            audio_pad: None,
             code_entry: None,
         }
     }
@@ -137,26 +132,23 @@ impl Menu {
             Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
             // Handled in next(), which returns actions.
             Status::ScreenPicked => {}
-            Status::AudioPad(pad) => self.audio_pad = Some(pad),
             Status::Info(_) => self.status = status,
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
-                self.audio_pad = None;
                 self.live.started = None;
                 self.status = status;
             }
         }
     }
 
-    /// Change the selected setting by hand. The audio delay also applies to the running cast.
+    /// Change the selected setting by hand.
     fn change_setting(&mut self, s: &mut Settings, dir: isize) {
         let row = self.row.selected().unwrap_or(0);
         change(s, row, dir);
-        if row == AUDIO_DELAY_ROW {
-            if let Some(pad) = self.audio_pad.as_ref().filter(|_| self.casting.is_some()) {
-                crate::capture::set_audio_delay(pad, s.audio_delay);
-                tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
-            }
+        // Not live: the offsets froze the image in sccast, and a restart may ask the panel to
+        // allow the PC again.
+        if row == AUDIO_DELAY_ROW && self.casting.is_some() {
+            self.status = Status::Info(format!("Audio delay {} ms: applies at the next cast", s.audio_delay));
         }
     }
 

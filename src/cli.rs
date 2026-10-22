@@ -35,9 +35,10 @@ pub enum Command {
         #[arg(long)]
         device: Option<String>,
         /// Delay the sound by this many milliseconds, if it comes before the image on the panel.
-        /// The menu changes it during a cast.
-        #[arg(long, default_value_t = 0)]
-        audio_delay: u64,
+        /// Negative: delay the image instead, if the sound comes after it.
+        /// Changed in the menu during a cast, it applies at the next cast.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        audio_delay: i64,
         /// The panel's address and command port, when --pin cannot give it.
         #[arg(long, conflicts_with = "device")]
         host: Option<std::net::SocketAddr>,

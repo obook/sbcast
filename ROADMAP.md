@@ -29,8 +29,10 @@ Done:
 
 - [x] Panels, presets and settings, prefilled from the command line
 - [x] Enter asks for the code the panel shows, then counts down while someone allows the cast (90 s)
-- [x] Stays during the cast: duration, reconnections, lost frames, CPU, bitrate, live audio delay
+- [x] Stays during the cast: duration, reconnections, lost frames, CPU, bitrate
 - [x] `p` chooses another screen and moves the running cast to it
+- [x] Audio delay in 50 ms steps, from -500 to 1500 ms (negative: the image waits), applied at the next cast: changed live, it froze the image in sccast
+- [x] Name a missing GStreamer element and its package at start
 
 To do:
 

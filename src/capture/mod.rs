@@ -14,7 +14,7 @@ mod portal;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use gstreamer as gst;
 use gstreamer::prelude::*;
 
@@ -32,13 +32,16 @@ pub struct Capture {
 
 impl Capture {
     /// Capture `screen` and the PC sound. `audio_delay_ms` shifts the sound later to line it
-    /// up with the image.
-    pub fn start(screen: &ScreenCast, stream: &Stream, audio_delay_ms: u64) -> anyhow::Result<Self> {
+    /// up with the image, or the image when negative.
+    pub fn start(screen: &ScreenCast, stream: &Stream, audio_delay_ms: i64) -> anyhow::Result<Self> {
         gst::init()?;
         let description = encode::describe(screen, stream);
         tracing::debug!(%description, "pipeline");
 
-        let pipeline = gst::parse::launch(&description).context("cannot build pipeline (missing GStreamer plugin?)")?;
+        if let Some((element, package)) = missing_plugin() {
+            bail!("GStreamer has no {element}: install {package} (Debian and Ubuntu name)");
+        }
+        let pipeline = gst::parse::launch(&description).context("cannot build the GStreamer pipeline")?;
         let bin = pipeline.downcast_ref::<gst::Bin>().context("pipeline is not a bin")?;
         if let Some(src) = bin.by_name("src") {
             restamp_on_arrival(&src, &pipeline)?;
@@ -64,16 +67,8 @@ impl Capture {
 
         pipeline.set_state(gst::State::Playing)?;
         tracing::info!("capture started");
-        let capture = Self { pipeline, dropped };
-        if let Some(pad) = capture.audio_pad() {
-            set_audio_delay(&pad, audio_delay_ms);
-        }
-        Ok(capture)
-    }
-
-    /// Output of the sound source: the menu moves its offset to change the audio delay live.
-    pub fn audio_pad(&self) -> Option<gst::Pad> {
-        self.pipeline.downcast_ref::<gst::Bin>()?.by_name("asrc")?.static_pad("src")
+        set_audio_delay(&pipeline, audio_delay_ms);
+        Ok(Self { pipeline, dropped })
     }
 
     /// Element `name` of the pipeline: appsinks and encoder.
@@ -92,9 +87,28 @@ impl Drop for Capture {
     }
 }
 
-/// Delay the sound by `ms`, on a running pipeline too (the menu changes it during a cast).
-pub fn set_audio_delay(pad: &gst::Pad, ms: u64) {
-    pad.set_offset(i64::try_from(ms).unwrap_or(0).saturating_mul(1_000_000));
+/// Delay the sound by `ms`, or the screen image when `ms` is negative. Only at the start:
+/// changed on a running pipeline, the same offsets froze the image in sccast (2026-10-22).
+fn set_audio_delay(pipeline: &gst::Element, ms: i64) {
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
+    for (source, delay) in [("asrc", ms), ("src", -ms)] {
+        if let Some(pad) = bin.by_name(source).and_then(|e| e.static_pad("src")) {
+            pad.set_offset(delay.max(0).saturating_mul(1_000_000));
+        }
+    }
+}
+
+/// First element sbcast needs that GStreamer lacks, with its package. The .deb pulls them all
+/// in; a build from source may miss one (x264enc is not in the default plugins).
+fn missing_plugin() -> Option<(&'static str, &'static str)> {
+    const NEEDED: [(&str, &str); 5] = [
+        ("x264enc", "gstreamer1.0-plugins-ugly"),
+        ("pipewiresrc", "gstreamer1.0-pipewire"),
+        ("pulsesrc", "gstreamer1.0-plugins-good"),
+        ("avenc_aac", "gstreamer1.0-libav"),
+        ("appsink", "gstreamer1.0-plugins-base"),
+    ];
+    NEEDED.into_iter().find(|(element, _)| gst::ElementFactory::find(element).is_none())
 }
 
 /// Ask `encoder` for a key frame with SPS and PPS.

@@ -219,14 +219,11 @@ impl Panel<'_> {
         Ok(lost)
     }
 
-    /// Live panel of the menu: bytes sent (bitrate), frames dropped, audio delay during the cast.
+    /// Live panel of the menu: bytes sent (bitrate), frames dropped.
     fn show_stats(&self, capture: &Capture, link: &media::Link) {
         let sent = Arc::clone(&link.sent);
         self.out.send(Status::Served(Box::new(move || sent.load(Ordering::Relaxed))));
         self.out.send(Status::Dropped(Arc::clone(&capture.dropped)));
         self.out.send(Status::NetworkDropped(Arc::clone(&link.dropped)));
-        if let Some(pad) = capture.audio_pad() {
-            self.out.send(Status::AudioPad(pad));
-        }
     }
 }

@@ -12,7 +12,7 @@ use crate::cli::Stream;
 #[derive(Clone)]
 pub struct Settings {
     pub stream: Stream,
-    pub audio_delay: u64,
+    pub audio_delay: i64,
     /// Code shown on the panel (`--pin`, or typed in the menu), kept for the next casts.
     pub pin: Option<String>,
     /// Name the panel shows when it asks to accept this PC (`--name`).
@@ -28,9 +28,10 @@ const PRESETS: [(&str, (u32, u32), u32); 3] = [
 const RESOLUTIONS: [(u32, u32); 3] = [(1920, 1080), (1280, 720), (854, 480)];
 const BITRATES: [u32; 6] = [1500, 2500, 4000, 6000, 8000, 10000];
 const FPS: [u32; 4] = [25, 30, 50, 60];
-/// 50 ms steps near 0, to tune lip sync by ear during a cast.
-const AUDIO_DELAYS: [u64; 12] = [0, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 1500];
-/// Row of the audio delay, applied at once to a running cast.
+/// 50 ms steps, to tune lip sync by ear. Negative: the image waits.
+const AUDIO_DELAY_STEP: i64 = 50;
+const AUDIO_DELAY_RANGE: (i64, i64) = (-500, 1500);
+/// Row of the audio delay, applied at the next cast.
 pub(super) const AUDIO_DELAY_ROW: usize = 5;
 
 pub(super) const ROWS: [&str; 6] = ["Preset", "Resolution", "Bitrate", "Frame rate", "Sound", "Audio delay"];
@@ -59,7 +60,10 @@ pub(super) fn change(s: &mut Settings, row: usize, dir: isize) {
         2 => st.bitrate = cycle(&BITRATES, st.bitrate, dir),
         3 => st.fps = cycle(&FPS, st.fps, dir),
         4 => st.no_audio = !st.no_audio,
-        _ => s.audio_delay = cycle(&AUDIO_DELAYS, s.audio_delay, dir),
+        _ => {
+            let (min, max) = AUDIO_DELAY_RANGE;
+            s.audio_delay = (s.audio_delay + AUDIO_DELAY_STEP * dir as i64).clamp(min, max);
+        }
     }
 }
 
