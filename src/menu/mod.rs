@@ -1,0 +1,305 @@
+//! menu/
+//! Terminal menu (ratatui): pick a panel found on the network, adjust the stream settings,
+//! follow the running cast. This file holds the menu state and the key loop; settings.rs,
+//! live.rs, draw.rs and panel.rs hold the rest.
+//!
+//! Author: O. Booklage
+//! Date: October 2026
+//! Licence: MIT
+
+mod code;
+mod draw;
+mod live;
+mod panel;
+mod settings;
+#[cfg(test)]
+mod tests;
+
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
+use std::time::Duration;
+
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use ratatui::widgets::ListState;
+use ratatui::DefaultTerminal;
+
+use crate::device::{discovery, CastDevice};
+use live::Live;
+pub use settings::Settings;
+use settings::{change, AUDIO_DELAY_ROW, ROWS};
+
+enum Found {
+    Device(CastDevice),
+    Done,
+}
+
+/// What the user asked for.
+#[derive(Debug)]
+pub enum Action {
+    /// Cast to this device, stopping the current cast first.
+    Cast(CastDevice),
+    Stop,
+    /// Choose the screen again in the portal dialog.
+    PickScreen,
+    Quit,
+}
+
+/// Progress of the running cast, sent by its thread.
+pub enum Status {
+    Info(String),
+    Error(String),
+    Ended,
+    Reconnecting,
+    /// Bytes sent so far, to measure the real bitrate.
+    Served(ByteCounter),
+    /// Frames dropped by the capture since the start.
+    Dropped(Arc<AtomicU64>),
+    /// Frames dropped because the network did not take them in time.
+    NetworkDropped(Arc<AtomicU64>),
+    /// Output of the cast's sound source: the audio delay row moves its offset live.
+    AudioPad(gstreamer::Pad),
+    /// The screen picker got a new screen: the running cast restarts on it.
+    ScreenPicked,
+}
+
+pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
+
+pub struct Menu {
+    devices: BTreeMap<String, CastDevice>,
+    device: ListState,
+    row: ListState,
+    on_settings: bool,
+    scanning: bool,
+    tick: usize,
+    tx: Sender<Found>,
+    rx: Receiver<Found>,
+    status: Status,
+    /// Id of the device being cast to.
+    casting: Option<String>,
+    status_tx: Sender<Status>,
+    status_rx: Receiver<Status>,
+    live: Live,
+    /// Sound source of the running cast, for the live audio delay.
+    audio_pad: Option<gstreamer::Pad>,
+    /// Panel whose code is being typed (None: a panel not in the list, `c`), and the code so far.
+    code_entry: Option<(Option<CastDevice>, String)>,
+}
+
+impl Menu {
+    pub fn new() -> Self {
+        let mut menu = Self::idle();
+        menu.scan();
+        menu
+    }
+
+    /// A menu that does not search the network yet.
+    fn idle() -> Self {
+        let (tx, rx) = mpsc::channel();
+        let (status_tx, status_rx) = mpsc::channel();
+        Self {
+            devices: BTreeMap::new(),
+            device: ListState::default().with_selected(Some(0)),
+            row: ListState::default().with_selected(Some(0)),
+            on_settings: false,
+            scanning: false,
+            tick: 0,
+            tx,
+            rx,
+            status: Status::Info("Choose a panel, then Enter".into()),
+            casting: None,
+            status_tx,
+            status_rx,
+            live: Live::default(),
+            audio_pad: None,
+            code_entry: None,
+        }
+    }
+
+    /// Channel for a new cast thread to report its progress. Replaces the previous one, so a
+    /// stopped cast's late messages (its "ended") are dropped instead of ending the new cast.
+    pub fn status_sender(&mut self) -> Sender<Status> {
+        (self.status_tx, self.status_rx) = mpsc::channel();
+        self.status_tx.clone()
+    }
+
+    /// Current channel, for messages that are not from a cast (screen picker).
+    pub fn current_sender(&self) -> Sender<Status> {
+        self.status_tx.clone()
+    }
+
+    pub fn set_status(&mut self, status: Status) {
+        match status {
+            Status::Reconnecting => self.live.reconnects += 1,
+            Status::Served(counter) => self.live.served = Some((counter, None)),
+            Status::Dropped(counter) => self.live.dropped = Some(counter),
+            Status::NetworkDropped(counter) => self.live.network_dropped = Some(counter),
+            // Handled in next(), which returns actions.
+            Status::ScreenPicked => {}
+            Status::AudioPad(pad) => self.audio_pad = Some(pad),
+            Status::Info(_) => self.status = status,
+            Status::Error(_) | Status::Ended => {
+                self.casting = None;
+                self.audio_pad = None;
+                self.live.started = None;
+                self.status = status;
+            }
+        }
+    }
+
+    /// Change the selected setting by hand. The audio delay also applies to the running cast.
+    fn change_setting(&mut self, s: &mut Settings, dir: isize) {
+        let row = self.row.selected().unwrap_or(0);
+        change(s, row, dir);
+        if row == AUDIO_DELAY_ROW {
+            if let Some(pad) = self.audio_pad.as_ref().filter(|_| self.casting.is_some()) {
+                crate::capture::set_audio_delay(pad, s.audio_delay);
+                tracing::info!(ms = s.audio_delay, "audio delay changed during the cast");
+            }
+        }
+    }
+
+    /// Mark the panel being cast to; a new cast starts new stats.
+    pub fn set_casting(&mut self, id: Option<String>) {
+        if id.is_some() {
+            self.live = Live::starting();
+        }
+        self.casting = id;
+    }
+
+    /// Redraw before a blocking step (portal dialog, stopping).
+    pub fn draw_now(&mut self, terminal: &mut DefaultTerminal, s: &Settings) -> std::io::Result<()> {
+        terminal.draw(|f| self.draw(f, s)).map(drop)
+    }
+
+    /// Browse in a thread; devices show up as they answer.
+    fn scan(&mut self) {
+        if self.scanning {
+            return;
+        }
+        self.scanning = true;
+        // Devices gone since the last scan (unplugged, new address) must not stay listed.
+        self.devices.clear();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            // Stop early once the menu is gone (send fails).
+            let result = discovery::browse(Duration::from_secs(8), |d| tx.send(Found::Device(d)).is_err());
+            if let Err(e) = result {
+                tracing::warn!("discovery failed: {e:#}");
+            }
+            let _ = tx.send(Found::Done);
+        });
+    }
+
+    /// Devices sorted by name, as listed.
+    fn list(&self) -> Vec<&CastDevice> {
+        let mut list: Vec<_> = self.devices.values().collect();
+        list.sort_by_key(|d| d.name.to_lowercase());
+        list
+    }
+
+    /// Draw and handle keys until the user asks for something. `quit` is set by SIGTERM.
+    pub fn next(&mut self, terminal: &mut DefaultTerminal, s: &mut Settings, quit: &AtomicBool) -> anyhow::Result<Action> {
+        loop {
+            if quit.load(Ordering::SeqCst) {
+                return Ok(Action::Quit);
+            }
+            while let Ok(found) = self.rx.try_recv() {
+                match found {
+                    // Keyed by id: a device answers several times.
+                    Found::Device(d) => drop(self.devices.insert(d.id.clone(), d)),
+                    Found::Done => self.scanning = false,
+                }
+            }
+            while let Ok(status) = self.status_rx.try_recv() {
+                // A panel reached by its code is not listed: Enter recasts it by hand.
+                if let Status::ScreenPicked = status {
+                    if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                        return Ok(Action::Cast(device.clone()));
+                    }
+                    continue;
+                }
+                self.set_status(status);
+            }
+            if self.live.started.is_some() {
+                self.live.sample();
+            }
+            terminal.draw(|f| self.draw(f, s))?;
+            self.tick += 1;
+            // About once a minute: a frozen menu shows in the log as the end of these lines.
+            if self.tick.is_multiple_of(600) {
+                tracing::info!(casting = self.casting.is_some(), code_entry = self.code_entry.is_some(), "menu loop alive");
+            }
+            if !event::poll(Duration::from_millis(100))? {
+                continue;
+            }
+            let Event::Key(key) = event::read()? else { continue };
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            // The panel's code must not end up in a log meant for bug reports.
+            if self.code_entry.is_none() {
+                tracing::info!(key = ?key.code, "key");
+            }
+            let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+            if let Some((panel, typed)) = self.code_entry.as_mut().filter(|_| !ctrl_c) {
+                match code::key(typed, key.code) {
+                    code::Typed::Editing => self.status = Status::Info(code::prompt(panel.as_ref(), typed)),
+                    code::Typed::Cancelled => {
+                        self.code_entry = None;
+                        self.status = Status::Info("Choose a panel, then Enter".into());
+                    }
+                    code::Typed::Done => {
+                        let (panel, typed) = self.code_entry.take().expect("code entry");
+                        s.pin = (!typed.is_empty()).then(|| typed.clone());
+                        // A panel not in the list: its code gives its address.
+                        match panel.map_or_else(|| code::panel(&typed), Ok) {
+                            Ok(panel) => return Ok(Action::Cast(panel)),
+                            Err(e) => self.status = Status::Error(e),
+                        }
+                    }
+                }
+                continue;
+            }
+            let count = if self.on_settings { ROWS.len() } else { self.devices.len() };
+            let state = if self.on_settings { &mut self.row } else { &mut self.device };
+            match key.code {
+                // Raw mode turns Ctrl+C into a key, not a signal.
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(Action::Quit),
+                KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
+                KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
+                KeyCode::Char('p') => return Ok(Action::PickScreen),
+                KeyCode::Char('c') => {
+                    self.status = Status::Info(code::prompt(None, ""));
+                    self.code_entry = Some((None, String::new()));
+                }
+                KeyCode::Up | KeyCode::Char('k') if count > 0 => {
+                    state.select(Some(state.selected().unwrap_or(0).checked_sub(1).unwrap_or(count - 1)));
+                }
+                KeyCode::Down | KeyCode::Char('j') if count > 0 => {
+                    state.select(Some((state.selected().unwrap_or(0) + 1) % count));
+                }
+                // Long device lists (a school network): jump by pages or to the ends.
+                KeyCode::PageDown if count > 0 => state.select(Some((state.selected().unwrap_or(0) + 10).min(count - 1))),
+                KeyCode::PageUp => state.select(Some(state.selected().unwrap_or(0).saturating_sub(10))),
+                KeyCode::Home => state.select(Some(0)),
+                KeyCode::End if count > 0 => state.select(Some(count - 1)),
+                KeyCode::Tab | KeyCode::BackTab => self.on_settings = !self.on_settings,
+                // A change by hand becomes the user's choice.
+                KeyCode::Left | KeyCode::Char('h') if self.on_settings => self.change_setting(s, -1),
+                KeyCode::Right | KeyCode::Char('l') if self.on_settings => self.change_setting(s, 1),
+                KeyCode::Char('r') => self.scan(),
+                KeyCode::Enter => {
+                    let list = self.list();
+                    let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
+                    // The panel may show a code to type first; the last one is offered again.
+                    let typed = s.pin.clone().unwrap_or_default();
+                    self.status = Status::Info(code::prompt(Some(&device), &typed));
+                    self.code_entry = Some((Some(device), typed));
+                }
+                _ => {}
+            }
+        }
+    }
+}

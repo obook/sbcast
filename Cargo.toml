@@ -1,0 +1,46 @@
+[package]
+name = "sbcast"
+version = "0.1.0"
+edition = "2021"
+# Set by gstreamer 0.25. Resolver 3 picks dependency versions that build with it.
+rust-version = "1.92"
+resolver = "3"
+license = "MIT"
+authors = ["Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"]
+description = "Cast your Linux desktop to an interactive panel, with touch control back to the PC"
+repository = "https://github.com/obook/sbcast"
+
+[dependencies]
+anyhow = "1.0.104"
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
+clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
+gstreamer = "0.25.4"
+# Already pulled by other crates: dup2, to send what libraries print on stderr to the log
+# while the menu owns the terminal.
+libc = "0.2.190"
+mdns-sd = "0.21.5"
+ratatui = "0.30.2"
+# Payloads of the panel's commands.
+serde_json = "1.0.154"
+# Already pulled by tokio: a small TCP send buffer for the media connections.
+socket2 = "0.6.5"
+tokio = { version = "1.54.0", features = ["rt", "net", "time"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+# cargo-deb, used by packaging/build-deb.sh. $auto adds the shared libraries (libgstreamer, libc);
+# the GStreamer plugins are loaded at run time, so they are listed by hand.
+[package.metadata.deb]
+maintainer = "Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"
+section = "video"
+depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pipewire, xdg-desktop-portal"
+recommends = "pipewire-pulse"
+extended-description = "sbcast casts the screen and sound of a Wayland desktop to an interactive panel, and lets the panel's touches drive the PC's pointer."
+assets = [
+    ["target/release/sbcast", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/sbcast/", "644"],
+]
