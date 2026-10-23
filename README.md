@@ -1,8 +1,11 @@
+<img src="media/icon.svg" alt="sbcast logo" width="128">
+
 # sbcast
 
 > [!NOTE]
-> Same family: [sccast](https://github.com/obook/sccast) for Chromecast,
-> [sacast](https://github.com/obook/sacast) for Apple TV.
+> Same family:
+> - <img src="https://raw.githubusercontent.com/obook/sccast/main/media/icon.svg" alt="" width="20"> [sccast](https://github.com/obook/sccast) for Chromecast
+> - <img src="https://raw.githubusercontent.com/obook/sacast/main/media/icon.svg" alt="" width="20"> [sacast](https://github.com/obook/sacast) for Apple TV
 
 `sbcast` casts a Linux desktop's screen and sound to an interactive panel
 that has a screenshare receiver. The panel's touches come back to the PC
