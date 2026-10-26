@@ -26,7 +26,7 @@ pub enum Command {
     /// List the interactive panels on the local network.
     List {
         /// Discovery duration in seconds.
-        #[arg(long, default_value_t = 8)]
+        #[arg(long, default_value_t = 12)]
         timeout: u64,
     },
     /// Cast the screen to a panel.
