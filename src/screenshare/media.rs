@@ -119,14 +119,23 @@ fn flush(socket: &mut TcpStream, pending: &mut Vec<u8>) -> io::Result<()> {
     Ok(())
 }
 
-/// Write each frame of appsink `name` to `socket` until `ended`. Video (the "sink" appsink):
-/// SPS and PPS apart, type 0, `index` when the panel wants one, bitrate adapted from
-/// `bitrate` down. Audio: the type field carries a clock in ms.
+/// How the frames are wrapped for the receiver.
+#[derive(Clone, Copy)]
+pub enum Framing {
+    /// This module's panels: SPS and PPS apart, type 0, `index` when the panel wants one.
+    /// Audio: the type field carries a clock in ms.
+    Panel { index: Option<i32> },
+    /// EShare (src/eshare/): SPS and PPS together in one packet, the picture in another.
+    Eshare,
+}
+
+/// Write each frame of appsink `name` to `socket` until `ended`, wrapped as `framing` says.
+/// Video (the "sink" appsink): bitrate adapted from `bitrate` down.
 pub fn send_frames(
     capture: &Capture,
     name: &'static str,
     mut socket: TcpStream,
-    mut index: Option<i32>,
+    framing: Framing,
     bitrate: u32,
     link: &Link,
     ended: &'static AtomicBool,
@@ -136,6 +145,10 @@ pub fn send_frames(
     let encoder = if video { Some(capture.element("venc").context("no encoder in the pipeline")?) } else { None };
     let link = link.clone();
     let started = Instant::now();
+    let mut index = match framing {
+        Framing::Panel { index } => index,
+        Framing::Eshare => None,
+    };
     Ok(std::thread::spawn(move || {
         let (mut pending, mut gate, mut rate) = (Vec::new(), Gate::default(), Rate::new(bitrate));
         let mut stalled_since: Option<Instant> = None;
@@ -182,9 +195,19 @@ pub fn send_frames(
             }
             let Ok(map) = buffer.map_readable() else { continue };
             let parts = if video { split_config(&map) } else { vec![map.as_slice()] };
-            for part in parts {
-                let kind = if video { 0 } else { started.elapsed().as_millis() as i32 };
-                let frame = media_frame(index, kind, part);
+            let frames: Vec<Vec<u8>> = match framing {
+                Framing::Eshare => crate::eshare::wire::video_packets(&parts, started.elapsed()),
+                Framing::Panel { .. } => parts
+                    .iter()
+                    .map(|part| {
+                        let kind = if video { 0 } else { started.elapsed().as_millis() as i32 };
+                        let frame = media_frame(index, kind, part);
+                        index = index.map(|i| i.wrapping_add(1));
+                        frame
+                    })
+                    .collect(),
+            };
+            for frame in frames {
                 // The first frames show in the trace how the panel gets them.
                 if video && traced < 3 {
                     traced += 1;
@@ -193,7 +216,6 @@ pub fn send_frames(
                 }
                 link.sent.fetch_add(frame.len() as u64, Ordering::Relaxed);
                 pending.extend_from_slice(&frame);
-                index = index.map(|i| i.wrapping_add(1));
             }
         }
         ended.store(true, Ordering::SeqCst);

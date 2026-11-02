@@ -20,6 +20,8 @@ gstreamer = "0.25.4"
 # while the menu owns the terminal.
 libc = "0.2.190"
 mdns-sd = "0.21.5"
+# Binary property lists of the EShare RTSP setup (src/eshare/).
+plist = { version = "1.10.3", default-features = false }
 ratatui = "0.30.2"
 # Payloads of the panel's commands.
 serde_json = "1.0.154"

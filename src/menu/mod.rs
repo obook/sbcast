@@ -329,9 +329,9 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
+                    // An EShare panel gives its code to sbcast: nothing to type.
                     if device.model == crate::device::discovery::ESHARE {
-                        self.status = Status::Error(format!("{}: EShare panel, not castable yet", device.name));
-                        continue;
+                        return Ok(Action::Cast(device));
                     }
                     // The panel may show a code to type first; the last one is offered again.
                     let typed = s.pin.clone().unwrap_or_default();
