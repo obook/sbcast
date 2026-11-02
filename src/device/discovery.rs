@@ -78,16 +78,32 @@ impl CastDevice {
 }
 
 impl CastDevice {
-    /// One line of the panels file: id, name, model, ip, port, tab-separated.
-    pub fn to_line(&self) -> String {
-        format!("{}\t{}\t{}\t{}\t{}", self.id, self.name, self.model, self.ip, self.port)
+    /// One line of the panels file: id, name, model, ip, port, date of the last answer
+    /// (Unix seconds), tab-separated.
+    fn to_line(&self, seen: u64) -> String {
+        format!("{}\t{}\t{}\t{}\t{}\t{seen}", self.id, self.name, self.model, self.ip, self.port)
     }
 
-    fn from_line(line: &str) -> Option<Self> {
-        let [id, name, model, ip, port] = line.split('\t').collect::<Vec<_>>().try_into().ok()?;
-        Some(Self { id: id.into(), name: name.into(), model: model.into(), ip: ip.parse().ok()?, port: port.parse().ok()? })
+    fn from_line(line: &str, now: u64) -> Option<(Self, u64)> {
+        let cols: Vec<_> = line.split('\t').collect();
+        let (cols, seen) = match cols.as_slice() {
+            [cols @ .., seen] if cols.len() == 5 => (cols, seen.parse().ok()?),
+            // A line written before the dates: counts as seen now, to start its 3 weeks.
+            cols => (cols, now),
+        };
+        let [id, name, model, ip, port]: [&str; 5] = cols.try_into().ok()?;
+        let device = Self { id: id.into(), name: name.into(), model: model.into(), ip: ip.parse().ok()?, port: port.parse().ok()? };
+        Some((device, seen))
     }
 }
+
+/// A panel silent this long is forgotten: removed, or on a network not visited lately.
+const FORGET_AFTER: u64 = 21 * 24 * 3600;
+/// A date moves at most once a day, so answers every 12 s do not rewrite the file.
+const DATE_STEP: u64 = 24 * 3600;
+
+/// Remembered panels by id, with the date of their last answer.
+type Memory = BTreeMap<String, (CastDevice, u64)>;
 
 /// Panels seen before, kept because a busy network (a school at 10 am) may not let their
 /// answers through: ~/.local/state/sbcast/panels.tsv.
@@ -95,17 +111,49 @@ fn panels_file() -> std::path::PathBuf {
     crate::screenshare::trace::path().with_file_name("panels.tsv")
 }
 
-/// Panels seen on earlier runs; none when the file is missing or unreadable.
-pub fn remembered() -> Vec<CastDevice> {
-    let text = std::fs::read_to_string(panels_file()).unwrap_or_default();
-    text.lines().filter_map(CastDevice::from_line).collect()
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// Write the panels seen so far. A failure only costs the memory, so it is logged and skipped.
-// ponytail: panels never leave the file; delete it by hand if a room is gone.
-pub fn remember<'a>(devices: impl IntoIterator<Item = &'a CastDevice>) {
+/// The file's panels, minus those silent for `FORGET_AFTER`.
+fn parse(text: &str, now: u64) -> Memory {
+    text.lines()
+        .filter_map(|line| CastDevice::from_line(line, now))
+        .filter(|(_, seen)| now.saturating_sub(*seen) < FORGET_AFTER)
+        .map(|(d, seen)| (d.id.clone(), (d, seen)))
+        .collect()
+}
+
+fn load(now: u64) -> Memory {
+    parse(&std::fs::read_to_string(panels_file()).unwrap_or_default(), now)
+}
+
+/// Panels seen on earlier runs; none when the file is missing or unreadable.
+pub fn remembered() -> Vec<CastDevice> {
+    load(now()).into_values().map(|(d, _)| d).collect()
+}
+
+/// Date `device`'s answer in `memory`. True when its line changed: new panel, new address
+/// or name, or a date a day old.
+fn update(memory: &mut Memory, device: &CastDevice, now: u64) -> bool {
+    let fresh = |(old, seen): &(CastDevice, u64)| old.to_line(*seen) == device.to_line(*seen) && now.saturating_sub(*seen) < DATE_STEP;
+    if memory.get(&device.id).is_some_and(fresh) {
+        return false;
+    }
+    memory.insert(device.id.clone(), (device.clone(), now));
+    true
+}
+
+/// `device` answered (mDNS, EShare search or ping): remember it, and drop the panels silent
+/// for 3 weeks. A failure only costs the memory, so it is logged and skipped.
+pub fn seen(device: &CastDevice) {
+    let now = now();
+    let mut memory = load(now);
+    if !update(&mut memory, device, now) {
+        return;
+    }
     let path = panels_file();
-    let text: String = devices.into_iter().map(|d| d.to_line() + "\n").collect();
+    let text: String = memory.values().map(|(d, seen)| d.to_line(*seen) + "\n").collect();
     let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, text));
     if let Err(e) = written {
         tracing::warn!(path = %path.display(), "cannot remember the panels: {e}");
@@ -245,10 +293,33 @@ mod tests {
         let ip = Ipv4Addr::new(10, 116, 7, 254);
         let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", ip, 57395).unwrap();
         assert_eq!((device.name.as_str(), device.model.as_str(), device.id.as_str()), ("COL-A11", ESHARE, "eshare:COL-A11"));
-        let line = device.to_line();
-        assert_eq!(CastDevice::from_line(&line).unwrap().to_line(), line);
-        assert!(CastDevice::from_line("COL-A11\tbroken").is_none());
         assert!(CastDevice::eshare("COL-A11._sspcast._tcp.local.", ip, 57395).is_none());
+    }
+
+    #[test]
+    fn forgets_panels_silent_for_three_weeks() {
+        const DAY: u64 = 24 * 3600;
+        let now = 1_800_000_000;
+        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
+        let line = device.to_line(now - 20 * DAY);
+        let old = CastDevice { id: "old".into(), ..device.clone() }.to_line(now - 21 * DAY);
+        let before_dates = "five\tSalle 104\tPanel\t10.0.0.8\t7385";
+        let memory = parse(&[line.as_str(), &old, before_dates, "COL-A11\tbroken"].join("\n"), now);
+        assert_eq!(memory.keys().collect::<Vec<_>>(), ["eshare:COL-A11", "five"]);
+        assert_eq!(memory["eshare:COL-A11"].0.to_line(now - 20 * DAY), line);
+        assert_eq!(memory["five"].1, now);
+    }
+
+    #[test]
+    fn rewrites_a_date_once_a_day_and_any_change_at_once() {
+        let now = 1_800_000_000;
+        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
+        let mut memory = Memory::new();
+        assert!(update(&mut memory, &device, now));
+        assert!(!update(&mut memory, &device, now + 3600));
+        let moved = CastDevice { ip: Ipv4Addr::new(10, 116, 7, 9), ..device.clone() };
+        assert!(update(&mut memory, &moved, now + 3600));
+        assert!(update(&mut memory, &moved, now + 3600 + 24 * 3600));
     }
 
     #[test]

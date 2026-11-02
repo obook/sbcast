@@ -237,13 +237,15 @@ impl Menu {
                     // Keyed by id: a device answers several times.
                     Found::Device(d) => {
                         self.answered.insert(d.id.clone());
-                        let line = d.to_line();
-                        // Write only what changed: a panel answers several times.
-                        if self.devices.insert(d.id.clone(), d).map(|old| old.to_line()) != Some(line) {
-                            discovery::remember(self.devices.values());
-                        }
+                        discovery::seen(&d);
+                        self.devices.insert(d.id.clone(), d);
                     }
-                    Found::Alive(id) => drop(self.answered.insert(id)),
+                    Found::Alive(id) => {
+                        if let Some(d) = self.devices.get(&id) {
+                            discovery::seen(d);
+                        }
+                        self.answered.insert(id);
+                    }
                     Found::Done if self.skip_done => self.skip_done = false,
                     Found::Done => self.scanning = false,
                 }
