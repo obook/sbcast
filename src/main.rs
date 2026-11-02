@@ -66,7 +66,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Cast { device, audio_delay, host, pin, name, stream } => {
-            let settings = menu::Settings { stream, audio_delay, pin, name };
+            let settings = menu::Settings { stream, audio_delay, pin, name, bytello: false };
             // A panel given by address or by its code, without discovery.
             if device.is_none() && (host.is_some() || settings.pin.is_some()) {
                 let host = match (host, settings.pin.as_deref()) {
