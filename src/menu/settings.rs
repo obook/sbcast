@@ -81,6 +81,6 @@ pub(super) fn value(s: &Settings, row: usize) -> String {
         3 => format!("{} fps", st.fps),
         4 => if st.no_audio { "off" } else { "on" }.to_string(),
         AUDIO_DELAY_ROW => format!("{} ms", s.audio_delay),
-        _ => if s.bytello { "Bytello (code)" } else { "EShare" }.to_string(),
+        _ => if s.bytello { "Bytello" } else { "EShare" }.to_string(),
     }
 }
