@@ -1,5 +1,5 @@
 //! wire.rs
-//! The bytes of the EShare protocol, read from the official Linux client's traffic
+//! The bytes of the RTSP panels' protocol, read from the traffic of their Linux client
 //! (2026-11-02, a COL-A22 panel at school) and checked with a prototype: text requests on
 //! 8121, RTSP with binary property lists, video packets with a 128-byte header, 8-byte touches.
 //!
@@ -30,10 +30,13 @@ pub fn pin(server_info: &str) -> Option<String> {
     info["pin"].as_str().map(str::to_string)
 }
 
-/// One RTSP request, as the official client writes it.
+/// User-Agent of the panels' own client: kept as is, in case the panels check it.
+const USER_AGENT: &str = "EShare (EShare 1.0)";
+
+/// One RTSP request, as the panels' own client writes it.
 pub fn rtsp_request(method: &str, host: &str, cseq: u32, body: &[u8]) -> Vec<u8> {
     let head = format!(
-        "{method} rtsp://{host} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: EShare (EShare 1.0)\r\nContent-Length: {}\r\n\r\n",
+        "{method} rtsp://{host} RTSP/1.0\r\nCSeq: {cseq}\r\nUser-Agent: {USER_AGENT}\r\nContent-Length: {}\r\n\r\n",
         body.len()
     );
     [head.as_bytes(), body].concat()

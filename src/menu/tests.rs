@@ -50,7 +50,7 @@ fn device(id: &str, name: &str) -> CastDevice {
 
 fn settings(bitrate: u32) -> Settings {
     let stream = Stream { resolution: (1920, 1080), fps: 30, bitrate, no_audio: false };
-    Settings { stream, audio_delay: 0, pin: None, name: "PC guest".into(), bytello: false }
+    Settings { stream, audio_delay: 0, pin: None, name: "PC guest".into(), via_code: false }
 }
 
 #[test]
@@ -154,14 +154,14 @@ fn ping_finds_only_hosts_that_answer() {
 }
 
 #[test]
-fn bytello_setting_aims_at_the_same_panel_on_7385() {
-    let eshare = CastDevice { id: "eshare:COL-A22".into(), name: "COL-A22".into(), model: crate::device::discovery::ESHARE.into(), ip: std::net::Ipv4Addr::new(10, 116, 11, 20), port: 57395 };
+fn code_connection_aims_at_the_same_panel_on_7385() {
+    let rtsp = CastDevice { id: "rtsp:COL-A22".into(), name: "COL-A22".into(), model: crate::device::discovery::RTSP_PANEL.into(), ip: std::net::Ipv4Addr::new(10, 116, 11, 20), port: 57395 };
     let mut s = settings(2500);
-    assert_eq!(super::through(eshare.clone(), &s).port, 57395);
+    assert_eq!(super::through(rtsp.clone(), &s).port, 57395);
     change(&mut s, ROWS.len() - 1, 1);
-    assert!(s.bytello);
-    let bytello = super::through(eshare.clone(), &s);
-    assert_eq!((bytello.id.as_str(), bytello.ip, bytello.port, bytello.model.as_str()), ("eshare:COL-A22", eshare.ip, 7385, "Bytello"));
+    assert!(s.via_code);
+    let code = super::through(rtsp.clone(), &s);
+    assert_eq!((code.id.as_str(), code.ip, code.port, code.model.as_str()), ("rtsp:COL-A22", rtsp.ip, 7385, "Panel"));
     // Other panels keep their own protocol.
     let other = device("x", "Room 1");
     assert_eq!(super::through(other.clone(), &s).port, other.port);

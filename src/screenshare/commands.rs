@@ -172,7 +172,7 @@ impl Drop for Commands {
 /// stands for a PC (1 for a phone).
 /// The device id stays the same across reconnections, runs and names: derived from the
 /// machine-id, which must not leave the PC as is (systemd says so), so hashed with sbcast's name.
-/// Message version of the receiver at school (iiyama_bytello 5.13.1.9074, 2026-11-02): it
+/// Message version of the panels' code receiver at school (5.13.1.9074, 2026-11-02): it
 /// refuses version 1 with -104 "protocol version too old".
 const PROTOCOL_VERSION: i32 = 75;
 /// A computer (2) of a recent version: as a dongle (5), or with version 0.1.2, the same

@@ -331,10 +331,10 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
-                    // An EShare panel gives its code to sbcast: nothing to type. Through Bytello,
-                    // the code the panel shows is asked below.
+                    // An RTSP panel gives its code to sbcast: nothing to type. Through its code
+                    // receiver, the code the panel shows is asked below.
                     let device = through(device, s);
-                    if device.model == crate::device::discovery::ESHARE {
+                    if device.model == crate::device::discovery::RTSP_PANEL {
                         return Ok(Action::Cast(device));
                     }
                     // The panel may show a code to type first; the last one is offered again.
@@ -362,12 +362,12 @@ fn ping_all(targets: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
     children.into_iter().filter_map(|(id, mut c)| c.wait().ok().filter(|s| s.success()).map(|_| id.clone())).collect()
 }
 
-/// `device`, or with the Bytello setting, the Bytello receiver of the same EShare panel. Same
-/// id: the list still marks the panel being cast to.
+/// `device`, or with the Code connection, the code receiver (port 7385) of the same RTSP
+/// panel. Same id: the list still marks the panel being cast to.
 fn through(device: CastDevice, s: &Settings) -> CastDevice {
-    if !s.bytello || device.model != crate::device::discovery::ESHARE {
+    if !s.via_code || device.model != crate::device::discovery::RTSP_PANEL {
         return device;
     }
     let port = crate::screenshare::pin::PORTS[0];
-    CastDevice { model: "Bytello".into(), port, ..device }
+    CastDevice { model: "Panel".into(), port, ..device }
 }
