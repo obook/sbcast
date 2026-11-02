@@ -252,7 +252,7 @@ impl Menu {
                 // A panel reached by its code is not listed: Enter recasts it by hand.
                 if let Status::ScreenPicked = status {
                     if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
-                        return Ok(Action::Cast(device.clone()));
+                        return Ok(Action::Cast(through(device.clone(), s)));
                     }
                     continue;
                 }
@@ -329,7 +329,9 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
-                    // An EShare panel gives its code to sbcast: nothing to type.
+                    // An EShare panel gives its code to sbcast: nothing to type. Through Bytello,
+                    // the code the panel shows is asked below.
+                    let device = through(device, s);
                     if device.model == crate::device::discovery::ESHARE {
                         return Ok(Action::Cast(device));
                     }
@@ -356,4 +358,14 @@ fn ping_all(targets: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
         })
         .collect();
     children.into_iter().filter_map(|(id, mut c)| c.wait().ok().filter(|s| s.success()).map(|_| id.clone())).collect()
+}
+
+/// `device`, or with the Bytello setting, the Bytello receiver of the same EShare panel. Same
+/// id: the list still marks the panel being cast to.
+fn through(device: CastDevice, s: &Settings) -> CastDevice {
+    if !s.bytello || device.model != crate::device::discovery::ESHARE {
+        return device;
+    }
+    let port = crate::screenshare::pin::PORTS[0];
+    CastDevice { model: "Bytello".into(), port, ..device }
 }

@@ -50,7 +50,7 @@ fn device(id: &str, name: &str) -> CastDevice {
 
 fn settings(bitrate: u32) -> Settings {
     let stream = Stream { resolution: (1920, 1080), fps: 30, bitrate, no_audio: false };
-    Settings { stream, audio_delay: 0, pin: None, name: "PC guest".into() }
+    Settings { stream, audio_delay: 0, pin: None, name: "PC guest".into(), bytello: false }
 }
 
 #[test]
@@ -151,4 +151,18 @@ fn ping_finds_only_hosts_that_answer() {
     // 192.0.2.1: TEST-NET-1, never routed.
     let targets = [("here".to_string(), std::net::Ipv4Addr::LOCALHOST), ("nowhere".to_string(), std::net::Ipv4Addr::new(192, 0, 2, 1))];
     assert_eq!(super::ping_all(&targets), vec!["here".to_string()]);
+}
+
+#[test]
+fn bytello_setting_aims_at_the_same_panel_on_7385() {
+    let eshare = CastDevice { id: "eshare:COL-A22".into(), name: "COL-A22".into(), model: crate::device::discovery::ESHARE.into(), ip: std::net::Ipv4Addr::new(10, 116, 11, 20), port: 57395 };
+    let mut s = settings(2500);
+    assert_eq!(super::through(eshare.clone(), &s).port, 57395);
+    change(&mut s, ROWS.len() - 1, 1);
+    assert!(s.bytello);
+    let bytello = super::through(eshare.clone(), &s);
+    assert_eq!((bytello.id.as_str(), bytello.ip, bytello.port, bytello.model.as_str()), ("eshare:COL-A22", eshare.ip, 7385, "Bytello"));
+    // Other panels keep their own protocol.
+    let other = device("x", "Room 1");
+    assert_eq!(super::through(other.clone(), &s).port, other.port);
 }

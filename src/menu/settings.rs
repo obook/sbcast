@@ -17,6 +17,9 @@ pub struct Settings {
     pub pin: Option<String>,
     /// Name the panel shows when it asks to accept this PC (`--name`).
     pub name: String,
+    /// Cast to an EShare panel through its other receiver, Bytello, on port 7385: the
+    /// school's iiyama panels run both.
+    pub bytello: bool,
 }
 
 /// Name, resolution, bitrate.
@@ -34,7 +37,7 @@ const AUDIO_DELAY_RANGE: (i64, i64) = (-500, 1500);
 /// Row of the audio delay, applied at the next cast.
 pub(super) const AUDIO_DELAY_ROW: usize = 5;
 
-pub(super) const ROWS: [&str; 6] = ["Preset", "Resolution", "Bitrate", "Frame rate", "Sound", "Audio delay"];
+pub(super) const ROWS: [&str; 7] = ["Preset", "Resolution", "Bitrate", "Frame rate", "Sound", "Audio delay", "Protocol"];
 
 /// Next (dir 1) or previous (dir -1) entry of `list`, wrapping. A value not in the list jumps to its first entry.
 pub(super) fn cycle<T: PartialEq + Copy>(list: &[T], current: T, dir: isize) -> T {
@@ -60,10 +63,11 @@ pub(super) fn change(s: &mut Settings, row: usize, dir: isize) {
         2 => st.bitrate = cycle(&BITRATES, st.bitrate, dir),
         3 => st.fps = cycle(&FPS, st.fps, dir),
         4 => st.no_audio = !st.no_audio,
-        _ => {
+        AUDIO_DELAY_ROW => {
             let (min, max) = AUDIO_DELAY_RANGE;
             s.audio_delay = (s.audio_delay + AUDIO_DELAY_STEP * dir as i64).clamp(min, max);
         }
+        _ => s.bytello = !s.bytello,
     }
 }
 
@@ -76,6 +80,7 @@ pub(super) fn value(s: &Settings, row: usize) -> String {
         2 => format!("{} kbit/s", st.bitrate),
         3 => format!("{} fps", st.fps),
         4 => if st.no_audio { "off" } else { "on" }.to_string(),
-        _ => format!("{} ms", s.audio_delay),
+        AUDIO_DELAY_ROW => format!("{} ms", s.audio_delay),
+        _ => if s.bytello { "Bytello" } else { "EShare" }.to_string(),
     }
 }
