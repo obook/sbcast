@@ -1,5 +1,6 @@
 //! discovery.rs
-//! Find the interactive panels (service `_sspcast._tcp`) on the local network with mDNS.
+//! Find the interactive panels (service `_sspcast._tcp`) on the local network with mDNS,
+//! and the EShare panels (`_eshareserver._tcp`), listed but not castable yet.
 //! Used by `sbcast list`, by `--device` and by the menu's list.
 //!
 //! Author: O. Booklage
@@ -10,10 +11,14 @@ use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::time::{Duration, Instant};
 
-use mdns_sd::{RecvTimeoutError, ResolvedService, ServiceDaemon, ServiceEvent};
+use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent};
 
 /// Unverified on a real panel.
 const SERVICE_TYPE: &str = "_sspcast._tcp.local.";
+/// EShare panels, seen at school (2026-11-02): TXT `sn=eshare_retail_pro`, `pin=<code>`.
+const ESHARE_TYPE: &str = "_eshareserver._tcp.local.";
+/// Model shown for an EShare panel; casting refuses it until its protocol is written.
+pub const ESHARE: &str = "EShare";
 
 /// A panel, reached on its command port `port`.
 #[derive(Debug, Clone)]
@@ -27,8 +32,19 @@ pub struct CastDevice {
 
 impl CastDevice {
     fn from_service(info: &ResolvedService) -> Option<Self> {
+        let ip = info.get_addresses_v4().into_iter().next();
+        if info.ty_domain == ESHARE_TYPE {
+            return Self::eshare(info.get_fullname(), ip?, info.get_port());
+        }
         let txt = |key: &str| info.get_property_val_str(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
-        Self::from_txt(txt, info.get_addresses_v4().into_iter().next(), info.get_port())
+        Self::from_txt(txt, ip, info.get_port())
+    }
+
+    /// EShare panel: its instance name (the room, e.g. COL-A11) is the shown name.
+    fn eshare(fullname: &str, ip: Ipv4Addr, port: u16) -> Option<Self> {
+        let name = fullname.strip_suffix(ESHARE_TYPE)?.trim_end_matches('.').to_string();
+        // Keyed by room, not address: a panel that gets a new address replaces its old line.
+        Some(Self { id: format!("eshare:{name}"), name, model: ESHARE.into(), ip, port })
     }
 
     /// Panel from its TXT record, its address (A record) and its SRV port.
@@ -40,6 +56,41 @@ impl CastDevice {
         let name = txt("name").unwrap_or_else(|| ip.to_string());
         let id = txt("id").unwrap_or_else(|| format!("{ip}:{port}"));
         Some(Self { id, name, model: "Panel".into(), ip, port })
+    }
+}
+
+impl CastDevice {
+    /// One line of the panels file: id, name, model, ip, port, tab-separated.
+    pub fn to_line(&self) -> String {
+        format!("{}\t{}\t{}\t{}\t{}", self.id, self.name, self.model, self.ip, self.port)
+    }
+
+    fn from_line(line: &str) -> Option<Self> {
+        let [id, name, model, ip, port] = line.split('\t').collect::<Vec<_>>().try_into().ok()?;
+        Some(Self { id: id.into(), name: name.into(), model: model.into(), ip: ip.parse().ok()?, port: port.parse().ok()? })
+    }
+}
+
+/// Panels seen before, kept because a busy network (a school at 10 am) may not let their
+/// answers through: ~/.local/state/sbcast/panels.tsv.
+fn panels_file() -> std::path::PathBuf {
+    crate::screenshare::trace::path().with_file_name("panels.tsv")
+}
+
+/// Panels seen on earlier runs; none when the file is missing or unreadable.
+pub fn remembered() -> Vec<CastDevice> {
+    let text = std::fs::read_to_string(panels_file()).unwrap_or_default();
+    text.lines().filter_map(CastDevice::from_line).collect()
+}
+
+/// Write the panels seen so far. A failure only costs the memory, so it is logged and skipped.
+// ponytail: panels never leave the file; delete it by hand if a room is gone.
+pub fn remember<'a>(devices: impl IntoIterator<Item = &'a CastDevice>) {
+    let path = panels_file();
+    let text: String = devices.into_iter().map(|d| d.to_line() + "\n").collect();
+    let written = path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(&path, text));
+    if let Err(e) = written {
+        tracing::warn!(path = %path.display(), "cannot remember the panels: {e}");
     }
 }
 
@@ -88,24 +139,39 @@ fn is_named(device: &CastDevice, query: &str) -> bool {
 pub const NONE_FOUND: &str = "no panel found (check that mDNS/UDP 5353 is not blocked, or use --pin)";
 
 /// Call `on_device` for each resolved panel until it returns true or `timeout` expires.
-pub fn browse(timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {
+pub fn browse(timeout: Duration, on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {
     let mdns = ServiceDaemon::new()?;
-    let browser = mdns.browse(SERVICE_TYPE)?;
+    let result = browse_with(&mdns, timeout, on_device);
+    let _ = mdns.shutdown();
+    result.map(|_| ())
+}
+
+/// One round of `browse` on a daemon kept by the caller: its cache keeps the answers of earlier
+/// rounds, which a busy network gives out a few at a time. Returns true when `on_device` stopped it.
+pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<bool> {
+    let browsers = [mdns.browse(SERVICE_TYPE)?, mdns.browse(ESHARE_TYPE)?];
+    let mut stopped = false;
     let deadline = Instant::now() + timeout;
-    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
-        match browser.recv_timeout(left) {
-            Ok(ServiceEvent::ServiceResolved(info)) => {
-                tracing::debug!(?info, "resolved");
-                if CastDevice::from_service(&info).is_some_and(&mut on_device) {
-                    break;
+    // ponytail: polls the two browsers every 50 ms; a select would wake at once, not worth a dependency.
+    'browse: while Instant::now() < deadline {
+        for browser in &browsers {
+            while let Ok(event) = browser.try_recv() {
+                if let ServiceEvent::ServiceResolved(info) = event {
+                    tracing::debug!(?info, "resolved");
+                    if CastDevice::from_service(&info).is_some_and(&mut on_device) {
+                        stopped = true;
+                        break 'browse;
+                    }
                 }
             }
-            Ok(_) => {}
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => break,
         }
+        std::thread::sleep(Duration::from_millis(50));
     }
-    let _ = mdns.shutdown();
-    Ok(())
+    // The next round's browse asks the network again and replays the cache.
+    for ty in [SERVICE_TYPE, ESHARE_TYPE] {
+        let _ = mdns.stop_browse(ty);
+    }
+    Ok(stopped)
 }
 
 #[cfg(test)]
@@ -119,6 +185,17 @@ mod tests {
         assert!(is_named(&device, "télé salle 12"));
         assert!(is_named(&device, "abc123"));
         assert!(!is_named(&device, "Salle 12"));
+    }
+
+    #[test]
+    fn names_an_eshare_panel_after_its_room() {
+        let ip = Ipv4Addr::new(10, 116, 7, 254);
+        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", ip, 57395).unwrap();
+        assert_eq!((device.name.as_str(), device.model.as_str(), device.id.as_str()), ("COL-A11", ESHARE, "eshare:COL-A11"));
+        let line = device.to_line();
+        assert_eq!(CastDevice::from_line(&line).unwrap().to_line(), line);
+        assert!(CastDevice::from_line("COL-A11\tbroken").is_none());
+        assert!(CastDevice::eshare("COL-A11._sspcast._tcp.local.", ip, 57395).is_none());
     }
 
     #[test]

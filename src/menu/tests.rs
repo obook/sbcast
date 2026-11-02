@@ -145,3 +145,10 @@ fn html(buffer: &ratatui::buffer::Buffer) -> String {
     }
     out + "</pre>"
 }
+
+#[test]
+fn ping_finds_only_hosts_that_answer() {
+    // 192.0.2.1: TEST-NET-1, never routed.
+    let targets = [("here".to_string(), std::net::Ipv4Addr::LOCALHOST), ("nowhere".to_string(), std::net::Ipv4Addr::new(192, 0, 2, 1))];
+    assert_eq!(super::ping_all(&targets), vec!["here".to_string()]);
+}

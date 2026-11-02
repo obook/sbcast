@@ -15,7 +15,7 @@ mod settings;
 #[cfg(test)]
 mod tests;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
@@ -32,6 +32,8 @@ use settings::{change, AUDIO_DELAY_ROW, ROWS};
 
 enum Found {
     Device(CastDevice),
+    /// A remembered panel answered a ping: there, though its mDNS answer may not come through.
+    Alive(String),
     Done,
 }
 
@@ -66,10 +68,16 @@ pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
 
 pub struct Menu {
     devices: BTreeMap<String, CastDevice>,
+    /// Ids that answered since the last scan; the others come from the panels file only.
+    answered: HashSet<String>,
     device: ListState,
     row: ListState,
     on_settings: bool,
     scanning: bool,
+    /// The browse thread runs (it never stops before the menu).
+    browsing: bool,
+    /// Ignore the end of the round under way: it began before a rescan cleared the list.
+    skip_done: bool,
     tick: usize,
     tx: Sender<Found>,
     rx: Receiver<Found>,
@@ -96,10 +104,13 @@ impl Menu {
         let (status_tx, status_rx) = mpsc::channel();
         Self {
             devices: BTreeMap::new(),
+            answered: HashSet::new(),
             device: ListState::default().with_selected(Some(0)),
             row: ListState::default().with_selected(Some(0)),
             on_settings: false,
             scanning: false,
+            browsing: false,
+            skip_done: false,
             tick: 0,
             tx,
             rx,
@@ -167,20 +178,44 @@ impl Menu {
 
     /// Browse in a thread; devices show up as they answer.
     fn scan(&mut self) {
-        if self.scanning {
+        self.scanning = true;
+        // Devices gone since the last scan (unplugged, new address) must not stay listed, except
+        // the remembered ones: a busy network may hide panels that are there.
+        self.devices = discovery::remembered().into_iter().map(|d| (d.id.clone(), d)).collect();
+        self.answered.clear();
+        let targets: Vec<_> = self.devices.values().map(|d| (d.id.clone(), d.ip)).collect();
+        if self.browsing {
+            // The round under way began before the clear: wait for the next full one.
+            self.skip_done = true;
             return;
         }
-        self.scanning = true;
-        // Devices gone since the last scan (unplugged, new address) must not stay listed.
-        self.devices.clear();
+        self.browsing = true;
         let tx = self.tx.clone();
+        // ponytail: a new round every 12 s for the menu's lifetime; slow it down if a large network minds the traffic.
         std::thread::spawn(move || {
-            // Stop early once the menu is gone (send fails).
-            let result = discovery::browse(Duration::from_secs(12), |d| tx.send(Found::Device(d)).is_err());
-            if let Err(e) = result {
-                tracing::warn!("discovery failed: {e:#}");
+            let mdns = match mdns_sd::ServiceDaemon::new() {
+                Ok(mdns) => mdns,
+                Err(e) => return tracing::warn!("discovery failed: {e:#}"),
+            };
+            loop {
+                // A school Wi-Fi drops most mDNS multicast but lets a ping through.
+                if ping_all(&targets).into_iter().any(|id| tx.send(Found::Alive(id)).is_err()) {
+                    break;
+                }
+                // Stop early once the menu is gone (send fails).
+                match discovery::browse_with(&mdns, Duration::from_secs(12), |d| tx.send(Found::Device(d)).is_err()) {
+                    Ok(true) => break,
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::warn!("discovery failed: {e:#}");
+                        std::thread::sleep(Duration::from_secs(12));
+                    }
+                }
+                if tx.send(Found::Done).is_err() {
+                    break;
+                }
             }
-            let _ = tx.send(Found::Done);
+            let _ = mdns.shutdown();
         });
     }
 
@@ -200,7 +235,16 @@ impl Menu {
             while let Ok(found) = self.rx.try_recv() {
                 match found {
                     // Keyed by id: a device answers several times.
-                    Found::Device(d) => drop(self.devices.insert(d.id.clone(), d)),
+                    Found::Device(d) => {
+                        self.answered.insert(d.id.clone());
+                        let line = d.to_line();
+                        // Write only what changed: a panel answers several times.
+                        if self.devices.insert(d.id.clone(), d).map(|old| old.to_line()) != Some(line) {
+                            discovery::remember(self.devices.values());
+                        }
+                    }
+                    Found::Alive(id) => drop(self.answered.insert(id)),
+                    Found::Done if self.skip_done => self.skip_done = false,
                     Found::Done => self.scanning = false,
                 }
             }
@@ -285,6 +329,10 @@ impl Menu {
                 KeyCode::Enter => {
                     let list = self.list();
                     let Some(device) = self.device.selected().and_then(|i| list.get(i)).map(|d| (*d).clone()) else { continue };
+                    if device.model == crate::device::discovery::ESHARE {
+                        self.status = Status::Error(format!("{}: EShare panel, not castable yet", device.name));
+                        continue;
+                    }
                     // The panel may show a code to type first; the last one is offered again.
                     let typed = s.pin.clone().unwrap_or_default();
                     self.status = Status::Info(code::prompt(Some(&device), &typed));
@@ -294,4 +342,18 @@ impl Menu {
             }
         }
     }
+}
+
+/// Ids of the `targets` that answer one ping within 1 s, all pinged at once.
+// ponytail: runs the system ping (iputils, in every Ubuntu); none answer if it is missing.
+fn ping_all(targets: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
+    use std::process::{Command, Stdio};
+    let children: Vec<_> = targets
+        .iter()
+        .filter_map(|(id, ip)| {
+            let child = Command::new("ping").args(["-c1", "-W1", &ip.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+            child.ok().map(|c| (id, c))
+        })
+        .collect();
+    children.into_iter().filter_map(|(id, mut c)| c.wait().ok().filter(|s| s.success()).map(|_| id.clone())).collect()
 }

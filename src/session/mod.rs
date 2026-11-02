@@ -46,5 +46,8 @@ impl Out {
 /// Cast `screen` to `device` until `stop` or the end of the cast.
 pub fn cast_screen(device: &CastDevice, s: &menu::Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     tracing::info!(name = %device.name, ip = %device.ip, "casting");
+    if device.model == crate::device::discovery::ESHARE {
+        anyhow::bail!("{} is an EShare panel: sbcast cannot cast to EShare yet", device.name);
+    }
     crate::screenshare::cast(SocketAddr::from((device.ip, device.port)), &device.name, s, screen, stop, out)
 }
