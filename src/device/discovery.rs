@@ -1,6 +1,7 @@
 //! discovery.rs
 //! Find the interactive panels (service `_sspcast._tcp`) on the local network with mDNS,
-//! and the EShare panels (`_eshareserver._tcp`), listed but not castable yet.
+//! and the EShare panels (`_eshareserver._tcp`, and the UDP broadcast of the EShare client),
+//! listed but not castable yet.
 //! Used by `sbcast list`, by `--device` and by the menu's list.
 //!
 //! Author: O. Booklage
@@ -8,7 +9,7 @@
 //! Licence: MIT
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
 use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent};
@@ -19,6 +20,12 @@ const SERVICE_TYPE: &str = "_sspcast._tcp.local.";
 const ESHARE_TYPE: &str = "_eshareserver._tcp.local.";
 /// Model shown for an EShare panel; casting refuses it until its protocol is written.
 pub const ESHARE: &str = "EShare";
+/// EShare command port, from the panels' mDNS answers.
+const ESHARE_PORT: u16 = 57395;
+/// UDP port of the EShare client's search: panels answer "<model>:<name>:8121:25123:56789:sn=...".
+/// Most panels of the school answer it, where few answer mDNS on the Wi-Fi (2026-11-02).
+const ESHARE_SEARCH_PORT: u16 = 48689;
+const ESHARE_SEARCH_WORD: &[u8] = b"FindECloudBox";
 
 /// A panel, reached on its command port `port`.
 #[derive(Debug, Clone)]
@@ -42,9 +49,20 @@ impl CastDevice {
 
     /// EShare panel: its instance name (the room, e.g. COL-A11) is the shown name.
     fn eshare(fullname: &str, ip: Ipv4Addr, port: u16) -> Option<Self> {
-        let name = fullname.strip_suffix(ESHARE_TYPE)?.trim_end_matches('.').to_string();
-        // Keyed by room, not address: a panel that gets a new address replaces its old line.
-        Some(Self { id: format!("eshare:{name}"), name, model: ESHARE.into(), ip, port })
+        let name = fullname.strip_suffix(ESHARE_TYPE)?.trim_end_matches('.');
+        Some(Self::eshare_named(name, ip, port))
+    }
+
+    /// Keyed by room, not address: a panel that gets a new address replaces its old line.
+    fn eshare_named(name: &str, ip: Ipv4Addr, port: u16) -> Self {
+        Self { id: format!("eshare:{name}"), name: name.into(), model: ESHARE.into(), ip, port }
+    }
+
+    /// EShare panel from its answer to the UDP search.
+    fn from_eshare_reply(reply: &[u8], ip: Ipv4Addr) -> Option<Self> {
+        let text = std::str::from_utf8(reply).ok()?;
+        let name = text.split(':').nth(1).map(str::trim).filter(|n| !n.is_empty())?;
+        Some(Self::eshare_named(name, ip, ESHARE_PORT))
     }
 
     /// Panel from its TXT record, its address (A record) and its SRV port.
@@ -138,6 +156,33 @@ fn is_named(device: &CastDevice, query: &str) -> bool {
 
 pub const NONE_FOUND: &str = "no panel found (check that mDNS/UDP 5353 is not blocked, or use --pin)";
 
+/// Send the EShare client's search to the local network; panels answer on the same port.
+/// None when the port cannot be opened: the mDNS search still runs.
+// ponytail: one broadcast to 255.255.255.255 leaves by the default route only; send it on each
+// interface (getifaddrs) if the PC has panels on two networks.
+fn eshare_search() -> Option<UdpSocket> {
+    let opened = (|| {
+        let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
+        // Shared: an EShare client running on the PC holds the same port.
+        socket.set_reuse_address(true)?;
+        socket.set_broadcast(true)?;
+        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, ESHARE_SEARCH_PORT)).into())?;
+        let socket: UdpSocket = socket.into();
+        socket.set_nonblocking(true)?;
+        socket.send_to(&eshare_search_message(), (Ipv4Addr::BROADCAST, ESHARE_SEARCH_PORT))?;
+        std::io::Result::Ok(socket)
+    })();
+    opened.inspect_err(|e| tracing::warn!("EShare search not sent: {e}")).ok()
+}
+
+/// 50 bytes: the word's length (big-endian) at 12, the word at 20.
+fn eshare_search_message() -> [u8; 50] {
+    let mut message = [0u8; 50];
+    message[12..16].copy_from_slice(&(ESHARE_SEARCH_WORD.len() as u32).to_be_bytes());
+    message[20..20 + ESHARE_SEARCH_WORD.len()].copy_from_slice(ESHARE_SEARCH_WORD);
+    message
+}
+
 /// Call `on_device` for each resolved panel until it returns true or `timeout` expires.
 pub fn browse(timeout: Duration, on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<()> {
     let mdns = ServiceDaemon::new()?;
@@ -150,6 +195,7 @@ pub fn browse(timeout: Duration, on_device: impl FnMut(CastDevice) -> bool) -> a
 /// rounds, which a busy network gives out a few at a time. Returns true when `on_device` stopped it.
 pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<bool> {
     let browsers = [mdns.browse(SERVICE_TYPE)?, mdns.browse(ESHARE_TYPE)?];
+    let eshare = eshare_search();
     let mut stopped = false;
     let deadline = Instant::now() + timeout;
     // ponytail: polls the two browsers every 50 ms; a select would wake at once, not worth a dependency.
@@ -163,6 +209,13 @@ pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl 
                         break 'browse;
                     }
                 }
+            }
+        }
+        let mut reply = [0u8; 512];
+        while let Some(Ok((len, SocketAddr::V4(from)))) = eshare.as_ref().map(|s| s.recv_from(&mut reply)) {
+            if CastDevice::from_eshare_reply(&reply[..len], *from.ip()).is_some_and(&mut on_device) {
+                stopped = true;
+                break 'browse;
             }
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -196,6 +249,16 @@ mod tests {
         assert_eq!(CastDevice::from_line(&line).unwrap().to_line(), line);
         assert!(CastDevice::from_line("COL-A11\tbroken").is_none());
         assert!(CastDevice::eshare("COL-A11._sspcast._tcp.local.", ip, 57395).is_none());
+    }
+
+    #[test]
+    fn reads_an_eshare_search_reply() {
+        let ip = Ipv4Addr::new(10, 116, 11, 20);
+        let device = CastDevice::from_eshare_reply(b"ECloudBox516Pro:COL-A22:8121:25123:56789:sn=0x103001ff", ip).unwrap();
+        assert_eq!((device.id.as_str(), device.name.as_str(), device.ip, device.port), ("eshare:COL-A22", "COL-A22", ip, 57395));
+        assert!(CastDevice::from_eshare_reply(b"FindECloudBox", ip).is_none());
+        let message = eshare_search_message();
+        assert_eq!((message[15], &message[20..33]), (13, &b"FindECloudBox"[..]));
     }
 
     #[test]
