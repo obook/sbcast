@@ -78,7 +78,7 @@ impl Menu {
             .map(|d| {
                 let live = self.casting.as_deref() == Some(d.id.as_str());
                 // Green: answered this time. Gray: only remembered, maybe off or hidden by the network.
-                let color = if self.answered.contains(&d.id) { Color::Green } else { Color::Gray };
+                let color = if self.answered.contains(&d.id) { Color::Green } else { Color::DarkGray };
                 ListItem::new(Line::from(vec![
                     Span::styled(if live { "● " } else { "" }, Style::new().fg(Color::Green)),
                     Span::styled(d.name.clone(), Style::new().fg(color).bold()),
