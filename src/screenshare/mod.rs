@@ -6,11 +6,11 @@
 //! Date: October 2026
 //! Licence: MIT
 
-mod approval;
+pub(crate) mod approval;
 mod commands;
-mod media;
+pub(crate) mod media;
 pub mod pin;
-mod pointer;
+pub(crate) mod pointer;
 mod rate;
 mod touch;
 pub mod trace;
@@ -29,7 +29,7 @@ use crate::menu::{Settings, Status};
 use crate::session::Out;
 use approval::{Refused, APPROVAL_TIMEOUT};
 use commands::{connect_request, Commands, CAST_STOPPED, DISCONNECTED};
-use media::send_frames;
+use media::{send_frames, Framing};
 
 /// (commandType, commandId) pairs, from the sender's ProtocolConstant (more in commands.rs).
 const CONNECT: (i32, i32) = (1, 1);
@@ -174,9 +174,9 @@ impl Panel<'_> {
         let link = media::Link::default();
         self.show_stats(&capture, &link);
         let index = (version >= INDEX_VERSION).then_some(0);
-        let mut senders = vec![send_frames(&capture, "sink", video_socket, index, s.stream.bitrate, &link, ended)?];
+        let mut senders = vec![send_frames(&capture, "sink", video_socket, Framing::Panel { index }, s.stream.bitrate, &link, ended)?];
         if let Some(socket) = audio_socket {
-            senders.push(send_frames(&capture, "asink", socket, None, s.stream.bitrate, &link, ended)?);
+            senders.push(send_frames(&capture, "asink", socket, Framing::Panel { index: None }, s.stream.bitrate, &link, ended)?);
         }
 
         let mut touchback = touch::Touchback::new(self.input(), self.host.ip(), s.stream.resolution);

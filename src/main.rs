@@ -12,6 +12,7 @@
 mod capture;
 mod cli;
 mod device;
+mod eshare;
 mod menu;
 mod screenshare;
 mod session;

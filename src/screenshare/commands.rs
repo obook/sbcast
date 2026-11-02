@@ -112,7 +112,7 @@ impl Commands {
         let (timestamp, payload) = (now_ms(), payload.to_string());
         trace::command("->", command_type, command_id, sequence, &payload);
         self.last_sent = Instant::now();
-        write_message(&mut self.socket, &ScreenshareMessage { version: 1, command_type, command_id, sequence, timestamp, payload })
+        write_message(&mut self.socket, &ScreenshareMessage { version: PROTOCOL_VERSION, command_type, command_id, sequence, timestamp, payload })
     }
 
     /// A heartbeat when nothing was sent for a while, so the panel keeps the session.
@@ -172,13 +172,21 @@ impl Drop for Commands {
 /// stands for a PC (1 for a phone).
 /// The device id stays the same across reconnections, runs and names: derived from the
 /// machine-id, which must not leave the PC as is (systemd says so), so hashed with sbcast's name.
+/// Message version of the receiver at school (iiyama_bytello 5.13.1.9074, 2026-11-02): it
+/// refuses version 1 with -104 "protocol version too old".
+const PROTOCOL_VERSION: i32 = 75;
+/// A computer (2) of a recent version: as a dongle (5), or with version 0.1.2, the same
+/// receiver refuses with -103 "Dongle version too old".
+const DEVICE_TYPE: i32 = 2;
+const DEVICE_VERSION: &str = "5.13.1.9074";
+
 pub fn connect_request(name: &str, pin: Option<&str>, local_ip: IpAddr) -> Value {
     let read = |path| std::fs::read_to_string(path).map(|text| text.trim().to_string()).ok().filter(|text| !text.is_empty());
     let machine_id = read("/etc/machine-id").or_else(|| read("/etc/hostname")).unwrap_or_default();
     let uuid = format!("{:016x}", fnv1a(&format!("sbcast {machine_id}")));
     let pin = pin.unwrap_or("");
-    json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": 5, "connectType": 0,
-        "deviceVersion": env!("CARGO_PKG_VERSION"), "deviceUuid": uuid, "originIp": local_ip.to_string(),
+    json!({"pincode": pin, "pinCode": pin, "deviceName": name, "deviceType": DEVICE_TYPE, "connectType": 0,
+        "deviceVersion": DEVICE_VERSION, "deviceUuid": uuid, "originIp": local_ip.to_string(),
         "supportMultiTouch": false, "supportPen": false, "functions": [], "systemName": "Linux"})
 }
 
