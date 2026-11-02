@@ -1,7 +1,6 @@
 //! discovery.rs
 //! Find the interactive panels (service `_sspcast._tcp`) on the local network with mDNS,
-//! and the EShare panels (`_eshareserver._tcp`, and the UDP broadcast of the EShare client),
-//! listed but not castable yet.
+//! and the RTSP panels (their own mDNS service, and a UDP broadcast search).
 //! Used by `sbcast list`, by `--device` and by the menu's list.
 //!
 //! Author: O. Booklage
@@ -16,16 +15,17 @@ use mdns_sd::{ResolvedService, ServiceDaemon, ServiceEvent};
 
 /// Unverified on a real panel.
 const SERVICE_TYPE: &str = "_sspcast._tcp.local.";
-/// EShare panels, seen at school (2026-11-02): TXT `sn=eshare_retail_pro`, `pin=<code>`.
-const ESHARE_TYPE: &str = "_eshareserver._tcp.local.";
-/// Model shown for an EShare panel; casting refuses it until its protocol is written.
-pub const ESHARE: &str = "EShare";
-/// EShare command port, from the panels' mDNS answers.
-const ESHARE_PORT: u16 = 57395;
-/// UDP port of the EShare client's search: panels answer "<model>:<name>:8121:25123:56789:sn=...".
+/// RTSP panels, seen at school (2026-11-02). This service type and the search word below are
+/// the values the panels answer to: they must stay as they are.
+const RTSP_SERVICE_TYPE: &str = "_eshareserver._tcp.local.";
+/// Model shown for an RTSP panel; session/ casts to it with rtsp/.
+pub const RTSP_PANEL: &str = "RTSP panel";
+/// Command port of an RTSP panel, from the panels' mDNS answers.
+const RTSP_PANEL_PORT: u16 = 57395;
+/// UDP port of the panels' search: they answer "<model>:<name>:8121:25123:56789:sn=...".
 /// Most panels of the school answer it, where few answer mDNS on the Wi-Fi (2026-11-02).
-const ESHARE_SEARCH_PORT: u16 = 48689;
-const ESHARE_SEARCH_WORD: &[u8] = b"FindECloudBox";
+const SEARCH_PORT: u16 = 48689;
+const SEARCH_WORD: &[u8] = b"FindECloudBox";
 
 /// A panel, reached on its command port `port`.
 #[derive(Debug, Clone)]
@@ -40,29 +40,29 @@ pub struct CastDevice {
 impl CastDevice {
     fn from_service(info: &ResolvedService) -> Option<Self> {
         let ip = info.get_addresses_v4().into_iter().next();
-        if info.ty_domain == ESHARE_TYPE {
-            return Self::eshare(info.get_fullname(), ip?, info.get_port());
+        if info.ty_domain == RTSP_SERVICE_TYPE {
+            return Self::rtsp_panel(info.get_fullname(), ip?, info.get_port());
         }
         let txt = |key: &str| info.get_property_val_str(key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         Self::from_txt(txt, ip, info.get_port())
     }
 
-    /// EShare panel: its instance name (the room, e.g. COL-A11) is the shown name.
-    fn eshare(fullname: &str, ip: Ipv4Addr, port: u16) -> Option<Self> {
-        let name = fullname.strip_suffix(ESHARE_TYPE)?.trim_end_matches('.');
-        Some(Self::eshare_named(name, ip, port))
+    /// RTSP panel: its instance name (the room, e.g. COL-A11) is the shown name.
+    fn rtsp_panel(fullname: &str, ip: Ipv4Addr, port: u16) -> Option<Self> {
+        let name = fullname.strip_suffix(RTSP_SERVICE_TYPE)?.trim_end_matches('.');
+        Some(Self::rtsp_named(name, ip, port))
     }
 
     /// Keyed by room, not address: a panel that gets a new address replaces its old line.
-    fn eshare_named(name: &str, ip: Ipv4Addr, port: u16) -> Self {
-        Self { id: format!("eshare:{name}"), name: name.into(), model: ESHARE.into(), ip, port }
+    fn rtsp_named(name: &str, ip: Ipv4Addr, port: u16) -> Self {
+        Self { id: format!("rtsp:{name}"), name: name.into(), model: RTSP_PANEL.into(), ip, port }
     }
 
-    /// EShare panel from its answer to the UDP search.
-    fn from_eshare_reply(reply: &[u8], ip: Ipv4Addr) -> Option<Self> {
+    /// RTSP panel from its answer to the UDP search.
+    fn from_search_reply(reply: &[u8], ip: Ipv4Addr) -> Option<Self> {
         let text = std::str::from_utf8(reply).ok()?;
         let name = text.split(':').nth(1).map(str::trim).filter(|n| !n.is_empty())?;
-        Some(Self::eshare_named(name, ip, ESHARE_PORT))
+        Some(Self::rtsp_named(name, ip, RTSP_PANEL_PORT))
     }
 
     /// Panel from its TXT record, its address (A record) and its SRV port.
@@ -144,7 +144,7 @@ fn update(memory: &mut Memory, device: &CastDevice, now: u64) -> bool {
     true
 }
 
-/// `device` answered (mDNS, EShare search or ping): remember it, and drop the panels silent
+/// `device` answered (mDNS, UDP search or ping): remember it, and drop the panels silent
 /// for 3 weeks. A failure only costs the memory, so it is logged and skipped.
 pub fn seen(device: &CastDevice) {
     let now = now();
@@ -204,30 +204,30 @@ fn is_named(device: &CastDevice, query: &str) -> bool {
 
 pub const NONE_FOUND: &str = "no panel found (check that mDNS/UDP 5353 is not blocked, or use --pin)";
 
-/// Send the EShare client's search to the local network; panels answer on the same port.
+/// Send the UDP search to the local network; panels answer on the same port.
 /// None when the port cannot be opened: the mDNS search still runs.
 // ponytail: one broadcast to 255.255.255.255 leaves by the default route only; send it on each
 // interface (getifaddrs) if the PC has panels on two networks.
-fn eshare_search() -> Option<UdpSocket> {
+fn udp_search() -> Option<UdpSocket> {
     let opened = (|| {
         let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::DGRAM, None)?;
-        // Shared: an EShare client running on the PC holds the same port.
+        // Shared: the panels' own client, if it runs on the PC, holds the same port.
         socket.set_reuse_address(true)?;
         socket.set_broadcast(true)?;
-        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, ESHARE_SEARCH_PORT)).into())?;
+        socket.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, SEARCH_PORT)).into())?;
         let socket: UdpSocket = socket.into();
         socket.set_nonblocking(true)?;
-        socket.send_to(&eshare_search_message(), (Ipv4Addr::BROADCAST, ESHARE_SEARCH_PORT))?;
+        socket.send_to(&search_message(), (Ipv4Addr::BROADCAST, SEARCH_PORT))?;
         std::io::Result::Ok(socket)
     })();
-    opened.inspect_err(|e| tracing::warn!("EShare search not sent: {e}")).ok()
+    opened.inspect_err(|e| tracing::warn!("UDP search not sent: {e}")).ok()
 }
 
 /// 50 bytes: the word's length (big-endian) at 12, the word at 20.
-fn eshare_search_message() -> [u8; 50] {
+fn search_message() -> [u8; 50] {
     let mut message = [0u8; 50];
-    message[12..16].copy_from_slice(&(ESHARE_SEARCH_WORD.len() as u32).to_be_bytes());
-    message[20..20 + ESHARE_SEARCH_WORD.len()].copy_from_slice(ESHARE_SEARCH_WORD);
+    message[12..16].copy_from_slice(&(SEARCH_WORD.len() as u32).to_be_bytes());
+    message[20..20 + SEARCH_WORD.len()].copy_from_slice(SEARCH_WORD);
     message
 }
 
@@ -242,8 +242,8 @@ pub fn browse(timeout: Duration, on_device: impl FnMut(CastDevice) -> bool) -> a
 /// One round of `browse` on a daemon kept by the caller: its cache keeps the answers of earlier
 /// rounds, which a busy network gives out a few at a time. Returns true when `on_device` stopped it.
 pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl FnMut(CastDevice) -> bool) -> anyhow::Result<bool> {
-    let browsers = [mdns.browse(SERVICE_TYPE)?, mdns.browse(ESHARE_TYPE)?];
-    let eshare = eshare_search();
+    let browsers = [mdns.browse(SERVICE_TYPE)?, mdns.browse(RTSP_SERVICE_TYPE)?];
+    let search = udp_search();
     let mut stopped = false;
     let deadline = Instant::now() + timeout;
     // ponytail: polls the two browsers every 50 ms; a select would wake at once, not worth a dependency.
@@ -260,8 +260,8 @@ pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl 
             }
         }
         let mut reply = [0u8; 512];
-        while let Some(Ok((len, SocketAddr::V4(from)))) = eshare.as_ref().map(|s| s.recv_from(&mut reply)) {
-            if CastDevice::from_eshare_reply(&reply[..len], *from.ip()).is_some_and(&mut on_device) {
+        while let Some(Ok((len, SocketAddr::V4(from)))) = search.as_ref().map(|s| s.recv_from(&mut reply)) {
+            if CastDevice::from_search_reply(&reply[..len], *from.ip()).is_some_and(&mut on_device) {
                 stopped = true;
                 break 'browse;
             }
@@ -269,7 +269,7 @@ pub fn browse_with(mdns: &ServiceDaemon, timeout: Duration, mut on_device: impl 
         std::thread::sleep(Duration::from_millis(50));
     }
     // The next round's browse asks the network again and replays the cache.
-    for ty in [SERVICE_TYPE, ESHARE_TYPE] {
+    for ty in [SERVICE_TYPE, RTSP_SERVICE_TYPE] {
         let _ = mdns.stop_browse(ty);
     }
     Ok(stopped)
@@ -289,31 +289,31 @@ mod tests {
     }
 
     #[test]
-    fn names_an_eshare_panel_after_its_room() {
+    fn names_an_rtsp_panel_after_its_room() {
         let ip = Ipv4Addr::new(10, 116, 7, 254);
-        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", ip, 57395).unwrap();
-        assert_eq!((device.name.as_str(), device.model.as_str(), device.id.as_str()), ("COL-A11", ESHARE, "eshare:COL-A11"));
-        assert!(CastDevice::eshare("COL-A11._sspcast._tcp.local.", ip, 57395).is_none());
+        let device = CastDevice::rtsp_panel(&format!("COL-A11.{RTSP_SERVICE_TYPE}"), ip, 57395).unwrap();
+        assert_eq!((device.name.as_str(), device.model.as_str(), device.id.as_str()), ("COL-A11", RTSP_PANEL, "rtsp:COL-A11"));
+        assert!(CastDevice::rtsp_panel("COL-A11._sspcast._tcp.local.", ip, 57395).is_none());
     }
 
     #[test]
     fn forgets_panels_silent_for_three_weeks() {
         const DAY: u64 = 24 * 3600;
         let now = 1_800_000_000;
-        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
+        let device = CastDevice::rtsp_panel(&format!("COL-A11.{RTSP_SERVICE_TYPE}"), Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
         let line = device.to_line(now - 20 * DAY);
         let old = CastDevice { id: "old".into(), ..device.clone() }.to_line(now - 21 * DAY);
         let before_dates = "five\tSalle 104\tPanel\t10.0.0.8\t7385";
         let memory = parse(&[line.as_str(), &old, before_dates, "COL-A11\tbroken"].join("\n"), now);
-        assert_eq!(memory.keys().collect::<Vec<_>>(), ["eshare:COL-A11", "five"]);
-        assert_eq!(memory["eshare:COL-A11"].0.to_line(now - 20 * DAY), line);
+        assert_eq!(memory.keys().collect::<Vec<_>>(), ["five", "rtsp:COL-A11"]);
+        assert_eq!(memory["rtsp:COL-A11"].0.to_line(now - 20 * DAY), line);
         assert_eq!(memory["five"].1, now);
     }
 
     #[test]
     fn rewrites_a_date_once_a_day_and_any_change_at_once() {
         let now = 1_800_000_000;
-        let device = CastDevice::eshare("COL-A11._eshareserver._tcp.local.", Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
+        let device = CastDevice::rtsp_panel(&format!("COL-A11.{RTSP_SERVICE_TYPE}"), Ipv4Addr::new(10, 116, 7, 254), 57395).unwrap();
         let mut memory = Memory::new();
         assert!(update(&mut memory, &device, now));
         assert!(!update(&mut memory, &device, now + 3600));
@@ -323,13 +323,13 @@ mod tests {
     }
 
     #[test]
-    fn reads_an_eshare_search_reply() {
+    fn reads_a_search_reply() {
         let ip = Ipv4Addr::new(10, 116, 11, 20);
-        let device = CastDevice::from_eshare_reply(b"ECloudBox516Pro:COL-A22:8121:25123:56789:sn=0x103001ff", ip).unwrap();
-        assert_eq!((device.id.as_str(), device.name.as_str(), device.ip, device.port), ("eshare:COL-A22", "COL-A22", ip, 57395));
-        assert!(CastDevice::from_eshare_reply(b"FindECloudBox", ip).is_none());
-        let message = eshare_search_message();
-        assert_eq!((message[15], &message[20..33]), (13, &b"FindECloudBox"[..]));
+        let device = CastDevice::from_search_reply(b"Model:COL-A22:8121:25123:56789:sn=0x103001ff", ip).unwrap();
+        assert_eq!((device.id.as_str(), device.name.as_str(), device.ip, device.port), ("rtsp:COL-A22", "COL-A22", ip, 57395));
+        assert!(CastDevice::from_search_reply(SEARCH_WORD, ip).is_none());
+        let message = search_message();
+        assert_eq!((message[15], &message[20..33]), (13, SEARCH_WORD));
     }
 
     #[test]

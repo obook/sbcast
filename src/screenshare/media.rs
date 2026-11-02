@@ -125,8 +125,8 @@ pub enum Framing {
     /// This module's panels: SPS and PPS apart, type 0, `index` when the panel wants one.
     /// Audio: the type field carries a clock in ms.
     Panel { index: Option<i32> },
-    /// EShare (src/eshare/): SPS and PPS together in one packet, the picture in another.
-    Eshare,
+    /// RTSP panels (src/rtsp/): SPS and PPS together in one packet, the picture in another.
+    Rtsp,
 }
 
 /// Write each frame of appsink `name` to `socket` until `ended`, wrapped as `framing` says.
@@ -147,7 +147,7 @@ pub fn send_frames(
     let started = Instant::now();
     let mut index = match framing {
         Framing::Panel { index } => index,
-        Framing::Eshare => None,
+        Framing::Rtsp => None,
     };
     Ok(std::thread::spawn(move || {
         let (mut pending, mut gate, mut rate) = (Vec::new(), Gate::default(), Rate::new(bitrate));
@@ -196,7 +196,7 @@ pub fn send_frames(
             let Ok(map) = buffer.map_readable() else { continue };
             let parts = if video { split_config(&map) } else { vec![map.as_slice()] };
             let frames: Vec<Vec<u8>> = match framing {
-                Framing::Eshare => crate::eshare::wire::video_packets(&parts, started.elapsed()),
+                Framing::Rtsp => crate::rtsp::wire::video_packets(&parts, started.elapsed()),
                 Framing::Panel { .. } => parts
                     .iter()
                     .map(|part| {

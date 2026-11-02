@@ -46,8 +46,8 @@ impl Out {
 /// Cast `screen` to `device` until `stop` or the end of the cast.
 pub fn cast_screen(device: &CastDevice, s: &menu::Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     tracing::info!(name = %device.name, ip = %device.ip, "casting");
-    if device.model == crate::device::discovery::ESHARE {
-        return crate::eshare::cast(device, s, screen, stop, out);
+    if device.model == crate::device::discovery::RTSP_PANEL {
+        return crate::rtsp::cast(device, s, screen, stop, out);
     }
     crate::screenshare::cast(SocketAddr::from((device.ip, device.port)), &device.name, s, screen, stop, out)
 }

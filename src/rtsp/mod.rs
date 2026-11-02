@@ -1,6 +1,6 @@
-//! eshare/
-//! Cast the screen to an EShare panel (the school's iiyama panels), with touch back. Read from
-//! the official Linux client's traffic and checked with a prototype on a panel (2026-11-02):
+//! rtsp/
+//! Cast the screen to an RTSP panel (the school's panels), with touch back. Read from the
+//! traffic of the panels' Linux client and checked with a prototype on a panel (2026-11-02):
 //!   8121   text: the panel's info, which holds its code, then the code back;
 //!   57395  JSON lines: a heartbeat each second, the cast request (a person taps Accept);
 //!   52030  the panel's states (STOP_MIRROR);
@@ -43,7 +43,7 @@ const TOUCH_SCREEN: (f64, f64) = (1920.0, 1080.0);
 /// Accepted on the panel; 2 means refused, or the dialog closed unanswered.
 const ACCEPTED: i64 = 1;
 
-/// Cast `screen` to the EShare panel `device` until `stop` or the panel's end of the cast.
+/// Cast `screen` to the RTSP panel `device` until `stop` or the panel's end of the cast.
 // ponytail: no reconnection after a loss, unlike screenshare/; add it if the school Wi-Fi cuts casts.
 pub fn cast(device: &CastDevice, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
     let ip = IpAddr::V4(device.ip);
@@ -71,7 +71,7 @@ pub fn cast(device: &CastDevice, s: &Settings, screen: &ScreenCast, stop: &'stat
     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
     let link = Link::default();
     let video = media::connect(SocketAddr::new(ip, data_port), data_port)?;
-    let sender = send_frames(&capture, "sink", video, Framing::Eshare, stream.bitrate, &link, ended)?;
+    let sender = send_frames(&capture, "sink", video, Framing::Rtsp, stream.bitrate, &link, ended)?;
     show_stats(&capture, &link, out);
     if let Some(input) = screen.input() {
         follow_touches(ip, input, ended)?;
@@ -159,7 +159,7 @@ impl Control {
                             break;
                         }
                     }
-                    Err(_) => tracing::debug!(%line, "EShare control line not understood"),
+                    Err(_) => tracing::debug!(%line, "RTSP control line not understood"),
                 }
             }
         });
@@ -180,7 +180,7 @@ impl Control {
         self.beats += 1;
         // The panel answers each beat with its state; castState 1 while someone casts.
         while let Ok(message) = self.incoming.try_recv() {
-            tracing::debug!(%message, "EShare control");
+            tracing::debug!(%message, "RTSP control");
         }
         Ok(())
     }
@@ -203,7 +203,7 @@ impl Control {
                 Ok(message) => match message["replyCastRequest"].as_i64() {
                     Some(ACCEPTED) => return Ok(true),
                     Some(_) => bail!(Refused::new("refused on the panel, or nobody tapped Accept in time")),
-                    None => tracing::debug!(%message, "EShare control"),
+                    None => tracing::debug!(%message, "RTSP control"),
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => self.beat()?,
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("the panel closed the control channel"),
@@ -233,7 +233,7 @@ fn watch_status(ip: IpAddr) -> anyhow::Result<(Arc<AtomicBool>, TcpStream)> {
         let mut chunk = [0; 1024];
         while let Ok(n @ 1..) = socket.read(&mut chunk) {
             let state = String::from_utf8_lossy(&chunk[..n]);
-            tracing::info!(%state, "EShare panel state");
+            tracing::info!(%state, "RTSP panel state");
             if state.contains("STOP_MIRROR") {
                 flag.store(true, Ordering::SeqCst);
             }
@@ -358,13 +358,13 @@ fn follow_touches(ip: IpAddr, input: Arc<Input>, ended: &'static AtomicBool) -> 
         while !ended.load(Ordering::SeqCst) {
             match socket.read(&mut chunk) {
                 Ok(0) => {
-                    tracing::info!("EShare touches: the panel closed the connection");
+                    tracing::info!("RTSP touches: the panel closed the connection");
                     break;
                 }
                 Ok(n) => pending.extend_from_slice(&chunk[..n]),
                 Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
                 Err(e) => {
-                    tracing::info!("EShare touches ended: {e}");
+                    tracing::info!("RTSP touches ended: {e}");
                     break;
                 }
             }
@@ -380,13 +380,13 @@ fn follow_touches(ip: IpAddr, input: Arc<Input>, ended: &'static AtomicBool) -> 
                 let (x, y, pressed) = (event.x, event.y, matches!(event.action, Action::Press(_)));
                 let desktop = on_desktop(event, input.size);
                 if pressed {
-                    tracing::info!(x, y, desktop_x = desktop.x, desktop_y = desktop.y, "EShare touch");
+                    tracing::info!(x, y, desktop_x = desktop.x, desktop_y = desktop.y, "RTSP touch");
                 }
                 apply(&input, &desktop, input.size);
             }
         }
     });
-    tracing::info!("EShare touch back on");
+    tracing::info!("RTSP touch back on");
     Ok(())
 }
 
