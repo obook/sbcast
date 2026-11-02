@@ -96,6 +96,12 @@ fn set_audio_delay(pipeline: &gst::Element, ms: i64) {
             pad.set_offset(delay.max(0).saturating_mul(1_000_000));
         }
     }
+    // A receiver may play the sound as it arrives, whatever its date (a TV did, in sccast),
+    // so dating it later is not enough: send each frame only when its date comes.
+    if let Some(sink) = bin.by_name("asink").filter(|_| ms > 0) {
+        sink.set_property("processing-deadline", 0u64);
+        sink.set_property("sync", true);
+    }
 }
 
 /// First element sbcast needs that GStreamer lacks, with its package. The .deb pulls them all

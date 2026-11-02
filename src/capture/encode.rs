@@ -49,9 +49,11 @@ fn video_encode(stream: &Stream) -> String {
     )
 }
 
-/// AAC at 44.1 kHz with ADTS headers, as the panel expects.
+/// AAC at 44.1 kHz with ADTS headers, as the panel expects. The queue holds the sound while
+/// asink waits for its date (positive audio delay, up to 1.5 s), so pulsesrc never blocks.
 fn audio_encode() -> &'static str {
     "audioconvert ! audioresample ! audio/x-raw,rate=44100,channels=2 \
      ! avenc_aac bitrate=128000 ! aacparse ! audio/mpeg,stream-format=adts \
+     ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000 \
      ! appsink name=asink sync=false max-buffers=20"
 }
