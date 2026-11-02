@@ -23,6 +23,25 @@ To do:
 - [ ] Follow the panel's size and frame rate requests, and its bitrate
 - [ ] Keep the panel connection between two casts, if a real panel asks for approval again each time
 
+## RTSP panels
+
+The school's panels run another receiver, read from the traffic of their own Linux client.
+
+Done:
+
+- [x] List them with mDNS, the UDP search on port 48689 and a ping of the panels seen before (`~/.local/state/sbcast/panels.tsv`). Green: the panel answers. Dark gray: remembered only
+- [x] Forget a panel silent for 3 weeks
+- [x] Cast with touch back (Connection: Accept). On COL-A22, image and pointer are right but writing lags
+- [x] Cast to the code receiver on port 7385 (Connection: Code): image only
+
+To do:
+
+- [ ] Sound
+- [ ] Reconnect after a loss
+- [ ] Make writing follow the pen with touch back
+- [ ] Touch back on the code receiver
+- [ ] Try Connection: Code from the menu on a panel
+
 ## Menu
 
 Done:
@@ -42,7 +61,7 @@ To do:
 
 Done:
 
-- [x] First release, v0.1.0: .deb for KDE neon and Ubuntu 26.04
+- [x] .deb for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.2.0
 
 To do:
 
