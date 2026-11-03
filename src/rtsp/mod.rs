@@ -143,6 +143,15 @@ struct Control {
     writer: TcpStream,
     incoming: mpsc::Receiver<Value>,
     beats: u64,
+    /// The panel said castState 1 before our cast: it already shows another sender.
+    other_cast: bool,
+}
+
+/// castState 1 while someone casts; seen as "1" in the official client's log, a number accepted too.
+// ponytail: only seen during our own cast (2026-11-02); untested with another sender on the panel.
+fn casting(message: &Value) -> bool {
+    let state = &message["castState"];
+    state.as_i64() == Some(1) || state.as_str() == Some("1")
 }
 
 impl Control {
@@ -163,7 +172,7 @@ impl Control {
                 }
             }
         });
-        let mut control = Self { writer: socket, incoming, beats: 0 };
+        let mut control = Self { writer: socket, incoming, beats: 0, other_cast: false };
         control.beat()?;
         let client = json!({"clientName": name, "clientType": 6, "isTouchable": 1, "reportClientInfo": "N",
             "versionCode": 23, "versionName": "v7.7.0721"});
@@ -178,11 +187,16 @@ impl Control {
     fn beat(&mut self) -> anyhow::Result<()> {
         self.send(&json!({"heartbeat": self.beats}))?;
         self.beats += 1;
-        // The panel answers each beat with its state; castState 1 while someone casts.
+        // The panel answers each beat with its state.
         while let Ok(message) = self.incoming.try_recv() {
-            tracing::debug!(%message, "RTSP control");
+            self.note(&message);
         }
         Ok(())
+    }
+
+    fn note(&mut self, message: &Value) {
+        tracing::debug!(%message, "RTSP control");
+        self.other_cast |= casting(message);
     }
 
     /// Ask to cast and wait for the person at the panel. Ok(false) at `stop`.
@@ -194,16 +208,19 @@ impl Control {
             if stop.load(Ordering::SeqCst) {
                 return Ok(false);
             }
-            // The menu counts down; the terminal says it once.
-            if said != Some(left.as_secs()) && (matches!(out, Out::Menu(_)) || said.is_none()) {
-                out.say(&format!("Tap Accept on the panel {name} ({} s)...", left.as_secs()));
-                said = Some(left.as_secs());
+            // The menu counts down; the terminal says it once, and again if another cast shows up.
+            let now = (left.as_secs(), self.other_cast);
+            let news = said.map(|(_, other)| other) != Some(now.1);
+            if news || matches!(out, Out::Menu(_)) && said != Some(now) {
+                let other = if self.other_cast { format!(" {name} already shows another cast: accepting replaces it.") } else { String::new() };
+                out.say(&format!("Tap Accept on the panel {name} ({} s)...{other}", left.as_secs()));
+                said = Some(now);
             }
             match self.incoming.recv_timeout(Duration::from_secs(1)) {
                 Ok(message) => match message["replyCastRequest"].as_i64() {
                     Some(ACCEPTED) => return Ok(true),
                     Some(_) => bail!(Refused::new("refused on the panel, or nobody tapped Accept in time")),
-                    None => tracing::debug!(%message, "RTSP control"),
+                    None => self.note(&message),
                 },
                 Err(mpsc::RecvTimeoutError::Timeout) => self.beat()?,
                 Err(mpsc::RecvTimeoutError::Disconnected) => bail!("the panel closed the control channel"),
@@ -425,6 +442,14 @@ mod tests {
         assert_eq!((corner.x, corner.y), (1536.0, 960.0));
         let left = on_desktop(touch(960.0, 540.0), (1536.0, 960.0));
         assert_eq!((left.x, left.y), (768.0, 480.0));
+    }
+
+    #[test]
+    fn sees_another_cast_in_the_panel_state() {
+        assert!(casting(&json!({"castState": "1", "multiScreen": "1"})));
+        assert!(casting(&json!({"castState": 1})));
+        assert!(!casting(&json!({"castState": "0"})));
+        assert!(!casting(&json!({"heartbeat": 3})));
     }
 
     #[test]
