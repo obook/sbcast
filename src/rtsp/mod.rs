@@ -390,6 +390,7 @@ fn follow_touches(ip: IpAddr, input: Arc<Input>, ended: &'static AtomicBool) -> 
                 .drain(..whole)
                 .collect::<Vec<u8>>()
                 .chunks_exact(8)
+                .inspect(|message| tracing::debug!("RTSP touch raw {message:02x?}"))
                 .filter_map(|message| wire::touch(message.try_into().ok()?))
                 .map(|touch| finger.event(touch))
                 .collect();
