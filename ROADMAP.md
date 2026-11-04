@@ -31,14 +31,22 @@ Done:
 
 - [x] List them with mDNS, the UDP search on port 48689 and a ping of the panels seen before (`~/.local/state/sbcast/panels.tsv`). Green: the panel answers. Dark gray: remembered only
 - [x] Forget a panel silent for 3 weeks
-- [x] Cast with touch back (Connection: Accept). On COL-A22, image and pointer are right but writing lags
+- [x] Cast with touch back (Connection: Accept). On COL-A22, image and pointer are right but writing lags. In room C22 (2026-11-04), the cast works very well (pen not tested)
 - [x] Cast to the code receiver on port 7385 (Connection: Code): image only
 
 To do:
 
 - [ ] Sound
 - [ ] Reconnect after a loss
-- [ ] Make writing follow the pen with touch back
+- [ ] Make writing follow the pen with touch back. Room B22 (panel COL-B22, formerly COL-A22, 10.116.11.20), 2026-11-04, writing in OpenBoard:
+  - Writing at normal speed leaves holes, and small curves come out straight. Very slow writing leaves fewer holes. The panel's own writing app has no holes: the sensor is fine
+  - Moving the pointer from the PC shows on the panel without lag: the video is not the cause. A performance power profile changes nothing
+  - Raw messages on port 52020 (`RTSP touch raw` at debug level): only type 5, 60 per second (one every 16 ms), about 4 steps of the 1920x1080 grid apart, each applied at once (no batching). Buttons: 3 while the pen is down, 1 then 3 at a press, 0 at a lift, rarely 4 or 5
+  - The holes are lifts sent by the panel itself: within a word, button 0, then nothing for 80 to 300 ms, then a press 20 to 90 steps further. sbcast drops nothing
+  - Tried and reverted: joining a lift and a press within 250 ms. It also joined separate words
+  - Not a pointer resolution issue: one grid step is 0.8 px of the 1536x960 desktop
+  - Official client capture (2026-11-02, `~/eshare-test/COL-A22-1312`): same messages, same 60 per second. It was not a writing test
+  - Next: write with the official client (`~/eshare-test/eshare.sh`, code from `getServerInfo` on port 8121) and compare. It runs in X11 under KDE Wayland and shows a black screen: start OpenBoard with `QT_QPA_PLATFORM=xcb openboard`, or use a Plasma (X11) session. Same holes: the panel's limit. Better writing: capture its traffic and compare
 - [ ] Touch back on the code receiver
 - [ ] Try Connection: Code from the menu on a panel
 
