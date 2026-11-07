@@ -81,7 +81,7 @@ To do:
 
 Done:
 
-- [x] .deb for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.2.0
+- [x] .deb for KDE neon and Ubuntu 26.04, releases v0.1.0 to v0.3.0
 
 To do:
 
