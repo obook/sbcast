@@ -20,6 +20,8 @@ and drive its pointer (touchback).
 - A Rust toolchain (`cargo`) 1.92 or newer, only to build from source.
 - The PC and the panel on the same local network. mDNS (UDP 5353) lets
   sbcast find the panels; without it, use the code shown on the panel.
+- `kdialog`, for the tray's code box and notifications; the `.deb`
+  recommends it.
 
 ## Install
 
@@ -82,19 +84,9 @@ line options prefill the settings. Arrows move and change, Tab switches columns,
 asks for the code the panel shows (empty if none), then casts. Someone may
 have to allow the cast on the panel: the menu counts down 90 s. `c` casts
 to a panel by its code alone, `s` stops, `p` chooses another screen and
-moves the running cast to it, `f` freezes the panel's image with "Freeze" in
-a corner (`f` again goes live; a new cast starts live), `q` or Ctrl+C quits.
-
-`sbcast tray` puts an icon in the desktop's notification area; the `.deb`
-starts it with every session (System Settings > Autostart turns that off).
-Its menu lists the panels and casts to the one clicked, after asking for the
-code it shows (empty if none). It also casts by code, stops, freezes, chooses
-another screen, sets the preset and opens the terminal menu. A red dot marks a
-running cast; errors show as notifications. The screen dialogs come back at
-each cast: the screen is shared only while a cast runs. The options below,
-except `--device`, `--pin` and `--host`, apply to the tray too. Its log is
-`$XDG_RUNTIME_DIR/sbcast-tray.log`. The code box and the notifications use
-`kdialog`.
+moves the running cast to it, `f` freezes the panel's image, with a small
+"Freeze" on a gray box in the top-right corner (`f` again goes live; a new
+cast starts live), `q` or Ctrl+C quits.
 
 | Option | Default | Effect |
 |---|---|---|
@@ -108,6 +100,23 @@ except `--device`, `--pin` and `--host`, apply to the tray too. Its log is
 | `--host IP:PORT` | | The panel's address and command port, when the code cannot give it |
 | `--name NAME` | `PC guest` | Name the panel shows when it asks to accept this PC |
 
+## Tray
+
+`sbcast tray` puts an icon in the desktop's notification area. The `.deb`
+starts it with each session; turn that off in System Settings > Autostart.
+
+Its menu lists the panels; click one to cast to it. For some panels, sbcast
+first asks for the code they show (leave it empty if there is none). The
+menu also casts by code, sets the preset and opens the terminal menu; during
+a cast, it stops, freezes and chooses another screen. Freeze waits half a
+second for the menu to close, so the frozen image does not show it.
+
+A red dot on the icon marks a running cast; errors show as notifications.
+The screen dialogs come back at each cast: sbcast shares the screen only
+while a cast runs.
+
+The tray takes the options above except `--device`, `--pin` and `--host`.
+
 ## Troubleshooting
 
 No panel found: the PC may block mDNS (UDP 5353). Use `--pin` or `c` in the
@@ -119,8 +128,12 @@ window, not the whole screen. Press `p` in the menu to choose again.
 The panel is lost during a cast: sbcast connects again every 2 s, without
 limit, until you stop it. A refusal on the panel ends the cast.
 
+No tray icon: look behind the arrow of the notification area. On GNOME, the
+icon needs the AppIndicator extension.
+
 Logs: `RUST_LOG=sbcast=debug sbcast cast ...`. The menu always writes its
-log to `$XDG_RUNTIME_DIR/sbcast.log`, emptied at each start. Each cast also
+log to `$XDG_RUNTIME_DIR/sbcast.log`, and the tray to `sbcast-tray.log` in
+the same directory, both emptied at each start. Each cast also
 writes a protocol trace to `~/.local/state/sbcast/screenshare.log`.
 
 ## Roadmap
