@@ -32,6 +32,11 @@ pub(super) fn key(code: &mut String, key: KeyCode) -> Typed {
     Typed::Editing
 }
 
+/// `code` could be a panel's code, as the menu lets it be typed.
+pub(crate) fn valid(code: &str) -> bool {
+    code.len() <= MAX_LEN && code.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 /// Status line while the code is typed, for a listed panel or (None) one found by its code.
 pub(super) fn prompt(panel: Option<&CastDevice>, code: &str) -> String {
     match panel {
@@ -41,7 +46,7 @@ pub(super) fn prompt(panel: Option<&CastDevice>, code: &str) -> String {
 }
 
 /// Panel at the address its code gives.
-pub(super) fn panel(code: &str) -> Result<CastDevice, String> {
+pub(crate) fn panel(code: &str) -> Result<CastDevice, String> {
     let address = crate::screenshare::pin::decode(code)?;
     let name = format!("Panel {}", address.ip());
     Ok(CastDevice { id: address.to_string(), name, model: "Panel".into(), ip: *address.ip(), port: address.port() })
@@ -61,6 +66,8 @@ mod tests {
         assert_eq!(code, "12a");
         assert_eq!(key(&mut code, KeyCode::Enter), Typed::Done);
         assert_eq!(key(&mut code, KeyCode::Esc), Typed::Cancelled);
+        assert!(valid("12a") && valid(""));
+        assert!(!valid("12-a") && !valid("1234567890123"));
     }
 
     #[test]

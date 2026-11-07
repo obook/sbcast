@@ -1,6 +1,7 @@
 //! session/
 //! How one cast runs and where its progress goes (the terminal or the menu). menu_loop.rs
-//! runs the casts started from the menu; terminal.rs holds the terminal helpers (spinner,
+//! runs the casts started from the menu, tray_loop.rs those started from the tray icon;
+//! terminal.rs holds the terminal helpers (spinner,
 //! panel choice, Ctrl+C).
 //!
 //! Author: O. Booklage
@@ -9,6 +10,7 @@
 
 mod menu_loop;
 mod terminal;
+mod tray_loop;
 
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
@@ -19,6 +21,7 @@ use crate::device::CastDevice;
 use crate::menu;
 pub use menu_loop::run_menu;
 pub use terminal::{pick_device, spin, stop_flag, SEARCHING};
+pub use tray_loop::run_tray;
 
 /// Where cast progress goes: the terminal, with spinners, or the menu.
 #[derive(Clone)]

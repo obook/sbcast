@@ -28,7 +28,7 @@ const SEARCH_PORT: u16 = 48689;
 const SEARCH_WORD: &[u8] = b"FindECloudBox";
 
 /// A panel, reached on its command port `port`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CastDevice {
     pub id: String,
     pub name: String,

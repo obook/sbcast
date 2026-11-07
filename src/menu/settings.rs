@@ -23,7 +23,7 @@ pub struct Settings {
 }
 
 /// Name, resolution, bitrate.
-const PRESETS: [(&str, (u32, u32), u32); 3] = [
+pub(crate) const PRESETS: [(&str, (u32, u32), u32); 3] = [
     ("Default", (1920, 1080), 2500),
     ("Full HD", (1920, 1080), 4000),
     ("720p", (1280, 720), 2500),
@@ -47,7 +47,7 @@ pub(super) fn cycle<T: PartialEq + Copy>(list: &[T], current: T, dir: isize) -> 
 }
 
 /// Index of the preset matching the current settings.
-fn preset(s: &Settings) -> Option<usize> {
+pub(crate) fn preset(s: &Settings) -> Option<usize> {
     PRESETS.iter().position(|(_, res, rate)| *res == s.stream.resolution && *rate == s.stream.bitrate)
 }
 

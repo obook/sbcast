@@ -7,7 +7,7 @@
 //! Date: October 2026
 //! Licence: MIT
 
-mod code;
+pub(crate) mod code;
 mod draw;
 mod live;
 mod panel;
@@ -28,6 +28,7 @@ use ratatui::DefaultTerminal;
 use crate::device::{discovery, CastDevice};
 use live::Live;
 pub use settings::Settings;
+pub(crate) use settings::{preset, PRESETS};
 use settings::{change, AUDIO_DELAY_ROW, ROWS};
 
 enum Found {
@@ -227,42 +228,70 @@ impl Menu {
         list
     }
 
+    /// Take in what the browse and cast threads sent. A new screen picked for the running cast
+    /// gives the action that restarts it there.
+    pub fn poll(&mut self, s: &Settings) -> Option<Action> {
+        while let Ok(found) = self.rx.try_recv() {
+            match found {
+                // Keyed by id: a device answers several times.
+                Found::Device(d) => {
+                    self.answered.insert(d.id.clone());
+                    discovery::seen(&d);
+                    self.devices.insert(d.id.clone(), d);
+                }
+                Found::Alive(id) => {
+                    if let Some(d) = self.devices.get(&id) {
+                        discovery::seen(d);
+                    }
+                    self.answered.insert(id);
+                }
+                Found::Done if self.skip_done => self.skip_done = false,
+                Found::Done => self.scanning = false,
+            }
+        }
+        while let Ok(status) = self.status_rx.try_recv() {
+            // A panel reached by its code is not listed: Enter recasts it by hand.
+            if let Status::ScreenPicked = status {
+                if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
+                    return Some(Action::Cast(through(device.clone(), s)));
+                }
+                continue;
+            }
+            self.set_status(status);
+        }
+        if self.live.started.is_some() {
+            self.live.sample();
+        }
+        None
+    }
+
+    /// Panels as listed, each with whether it answered since the last scan.
+    pub fn panels(&self) -> Vec<(CastDevice, bool)> {
+        self.list().into_iter().map(|d| (d.clone(), self.answered.contains(&d.id))).collect()
+    }
+
+    /// Id of the panel being cast to.
+    pub fn casting(&self) -> Option<&str> {
+        self.casting.as_deref()
+    }
+
+    /// The status line, and whether it is an error. None once a cast has ended.
+    pub fn status_line(&self) -> Option<(&str, bool)> {
+        match &self.status {
+            Status::Info(m) => Some((m, false)),
+            Status::Error(m) => Some((m, true)),
+            _ => None,
+        }
+    }
+
     /// Draw and handle keys until the user asks for something. `quit` is set by SIGTERM.
     pub fn next(&mut self, terminal: &mut DefaultTerminal, s: &mut Settings, quit: &AtomicBool) -> anyhow::Result<Action> {
         loop {
             if quit.load(Ordering::SeqCst) {
                 return Ok(Action::Quit);
             }
-            while let Ok(found) = self.rx.try_recv() {
-                match found {
-                    // Keyed by id: a device answers several times.
-                    Found::Device(d) => {
-                        self.answered.insert(d.id.clone());
-                        discovery::seen(&d);
-                        self.devices.insert(d.id.clone(), d);
-                    }
-                    Found::Alive(id) => {
-                        if let Some(d) = self.devices.get(&id) {
-                            discovery::seen(d);
-                        }
-                        self.answered.insert(id);
-                    }
-                    Found::Done if self.skip_done => self.skip_done = false,
-                    Found::Done => self.scanning = false,
-                }
-            }
-            while let Ok(status) = self.status_rx.try_recv() {
-                // A panel reached by its code is not listed: Enter recasts it by hand.
-                if let Status::ScreenPicked = status {
-                    if let Some(device) = self.casting.as_ref().and_then(|id| self.devices.get(id)) {
-                        return Ok(Action::Cast(through(device.clone(), s)));
-                    }
-                    continue;
-                }
-                self.set_status(status);
-            }
-            if self.live.started.is_some() {
-                self.live.sample();
+            if let Some(action) = self.poll(s) {
+                return Ok(action);
             }
             terminal.draw(|f| self.draw(f, s))?;
             self.tick += 1;

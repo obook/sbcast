@@ -16,6 +16,8 @@ ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "s
 clap = { version = "4.6.7", features = ["derive"] }
 ctrlc = { version = "3.5.2", features = ["termination"] }
 gstreamer = "0.25.4"
+# The icon in the desktop's notification area (src/tray/); zbus is already pulled by ashpd.
+ksni = { version = "0.3.7", features = ["blocking"] }
 # Already pulled by other crates: dup2, to send what libraries print on stderr to the log
 # while the menu owns the terminal.
 libc = "0.2.190"
@@ -40,9 +42,14 @@ tempfile = "3.27.0"
 maintainer = "Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"
 section = "video"
 depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pipewire, gstreamer1.0-x, xdg-desktop-portal"
-recommends = "pipewire-pulse"
+# kdialog: the tray's code box and notifications.
+recommends = "pipewire-pulse, kdialog"
 extended-description = "sbcast casts the screen and sound of a Wayland desktop to an interactive panel, and lets the panel's touches drive the PC's pointer."
 assets = [
     ["target/release/sbcast", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/sbcast/", "644"],
+    ["media/icon.svg", "usr/share/icons/hicolor/scalable/apps/sbcast.svg", "644"],
+    # The tray: in the application menu, and started with every session.
+    ["packaging/sbcast-tray.desktop", "usr/share/applications/", "644"],
+    ["packaging/sbcast-tray.desktop", "etc/xdg/autostart/", "644"],
 ]

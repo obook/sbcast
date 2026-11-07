@@ -52,6 +52,18 @@ pub enum Command {
         #[command(flatten)]
         stream: Stream,
     },
+    /// Stay in the desktop's notification area: cast from its menu.
+    Tray {
+        /// Delay the sound by this many milliseconds, if it comes before the image on the panel.
+        /// Negative: delay the image instead.
+        #[arg(long, default_value_t = 0, allow_negative_numbers = true)]
+        audio_delay: i64,
+        /// Name the panel shows when it asks to accept this PC.
+        #[arg(long, default_value = "PC guest")]
+        name: String,
+        #[command(flatten)]
+        stream: Stream,
+    },
 }
 
 /// Capture settings.
