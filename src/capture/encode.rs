@@ -37,15 +37,17 @@ pub fn describe(screen: &ScreenCast, stream: &Stream) -> String {
 /// Profile High with the encoder's auto level stays within 4.1 at 1080p30.
 /// One access unit per buffer, SPS/PPS before each key frame (the panel can start on any).
 /// Key frames every 5 s only: the panel asks for one when it needs it.
-/// The overlay writes a small, faint "Freeze" while the image is frozen (`f` in the menu).
+/// The overlay writes a small "Freeze" on a gray box while the image is frozen (`f` in the menu).
 /// auto-resize off: on, the font grew with the width, three times its size at 1920.
+/// The box is textoverlay's shading, with margins: a Pango background was cut at the letters.
 fn video_encode(stream: &Stream) -> String {
     let Stream { resolution: (width, height), fps, bitrate, .. } = stream;
     let key_interval = fps * 5;
     format!(
         "video/x-raw,format=I420,width={width},height={height},pixel-aspect-ratio=1/1,framerate={fps}/1 \
          ! textoverlay name=freeze text=Freeze silent=true valignment=top halignment=right \
-           auto-resize=false draw-shadow=false color=0x50ffffff outline-color=0x50000000 font-desc=\"Sans Bold 14\" \
+           auto-resize=false draw-shadow=false shaded-background=true shading-value=120 \
+           color=0xc0ffffff outline-color=0x50000000 font-desc=\"Sans Bold 14\" \
          ! x264enc name=venc tune=zerolatency speed-preset=veryfast key-int-max={key_interval} bitrate={bitrate} \
          ! video/x-h264,profile=high \
          ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au \
