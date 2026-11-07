@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use super::{cast_screen, stop_flag, Out};
 use crate::capture::ScreenCast;
+use crate::device::CastDevice;
 use crate::menu;
 
 /// Run the menu until the user quits.
@@ -22,7 +23,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Ctrl+C is a key in the menu; the flag still catches SIGTERM.
     let quit = stop_flag()?;
     // A fresh log for each run, open before the portal so its answer is logged too.
-    if let Ok(file) = std::fs::File::create(crate::log_path()) {
+    if let Ok(file) = std::fs::File::create(crate::runtime_file("sbcast.log")) {
         let _ = crate::MENU_LOG.set(file);
     }
     // The screen first, before the menu takes the terminal.
@@ -36,7 +37,7 @@ pub fn run_menu(mut settings: menu::Settings) -> anyhow::Result<()> {
     // Not restore(): its eprintln! panics when the terminal was closed.
     let _ = ratatui::try_restore();
     run.unwrap_or_else(|panic| {
-        let _ = writeln!(std::io::stderr(), "sbcast stopped on an internal error: see {}", crate::log_path().display());
+        let _ = writeln!(std::io::stderr(), "sbcast stopped on an internal error: see {}", crate::runtime_file("sbcast.log").display());
         std::panic::resume_unwind(panic)
     })
 }
@@ -52,7 +53,7 @@ fn drive_menu(
         menu.set_status(menu::Status::Info(note));
     }
     // Chosen before the menu, kept for every cast; p replaces it.
-    let screen = Arc::new(Mutex::new(Arc::new(screen)));
+    let screen = Arc::new(Mutex::new(Some(Arc::new(screen))));
     // Stop flag of the running cast, and its thread.
     let mut running: Option<(&'static AtomicBool, JoinHandle<()>)> = None;
     // Error of a terminal closed without quitting: returned once the cast is stopped.
@@ -68,7 +69,7 @@ fn drive_menu(
         };
         tracing::info!(?action, "menu action");
         if let menu::Action::PickScreen = action {
-            pick_screen(&menu, &screen);
+            pick_screen(Out::Menu(menu.current_sender()), &screen);
             continue;
         }
         if let Some((stop, cast)) = running.take() {
@@ -86,30 +87,64 @@ fn drive_menu(
             menu::Action::Stop | menu::Action::PickScreen => continue,
             menu::Action::Cast(device) => device,
         };
-        // ponytail: one leaked flag per cast (a byte), the cast wants a 'static flag.
-        let stop: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
-        stop_on_signal(stop, quit);
-        let out = Out::Menu(menu.status_sender());
-        let settings = s.clone();
-        let screen = Arc::clone(&screen.lock().unwrap());
-        menu.set_casting(Some(device.id.clone()));
-        let cast = std::thread::spawn(move || {
-            let result = cast_screen(&device, &settings, &screen, stop, &out);
-            tracing::info!(ok = result.is_ok(), "cast thread: cast ended");
-            match result {
-                Ok(()) => out.send(menu::Status::Ended),
-                // The sharing may have been stopped from the desktop.
-                Err(e) if format!("{e:#}").contains("capture") => {
-                    out.send(menu::Status::Error(format!("{e:#} (p: choose the screen again)")))
-                }
-                Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
-            }
-            // Dropping the last copy of an old screen closes its portal session here.
-            drop(screen);
-            tracing::info!("cast thread: done");
-        });
-        running = Some((stop, cast));
+        running = Some(start_cast(&mut menu, device, s, &screen, quit));
     }
+}
+
+/// Cast to `device` in a thread, on the screen in `slot`. An empty slot (the tray) opens the
+/// screen dialogs first and keeps the screen there for the next casts.
+pub(super) fn start_cast(
+    menu: &mut menu::Menu,
+    device: CastDevice,
+    s: &menu::Settings,
+    slot: &Arc<Mutex<Option<Arc<ScreenCast>>>>,
+    quit: &'static AtomicBool,
+) -> (&'static AtomicBool, JoinHandle<()>) {
+    // ponytail: one leaked flag per cast (a byte), the cast wants a 'static flag.
+    let stop: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
+    stop_on_signal(stop, quit);
+    let out = Out::Menu(menu.status_sender());
+    let settings = s.clone();
+    let slot = Arc::clone(slot);
+    menu.set_casting(Some(device.id.clone()));
+    let cast = std::thread::spawn(move || {
+        let opened = slot.lock().unwrap().clone();
+        let screen = match opened {
+            Some(screen) => screen,
+            None => {
+                out.say("Choose the screen in the dialog...");
+                match ScreenCast::open() {
+                    Ok(screen) => {
+                        if let Some(note) = screen.note() {
+                            out.say(&note);
+                        }
+                        // Stopped during the dialog: the screen closes here instead of staying shared.
+                        if stop.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        let screen = Arc::new(screen);
+                        *slot.lock().unwrap() = Some(Arc::clone(&screen));
+                        screen
+                    }
+                    Err(e) => return out.send(menu::Status::Error(format!("No screen: {e:#}"))),
+                }
+            }
+        };
+        let result = cast_screen(&device, &settings, &screen, stop, &out);
+        tracing::info!(ok = result.is_ok(), "cast thread: cast ended");
+        match result {
+            Ok(()) => out.send(menu::Status::Ended),
+            // The sharing may have been stopped from the desktop.
+            Err(e) if format!("{e:#}").contains("capture") => {
+                out.send(menu::Status::Error(format!("{e:#} (choose the screen again)")))
+            }
+            Err(e) => out.send(menu::Status::Error(format!("{e:#}"))),
+        }
+        // Dropping the last copy of an old screen closes its portal session here.
+        drop(screen);
+        tracing::info!("cast thread: done");
+    });
+    (stop, cast)
 }
 
 /// Stop the cast when `quit` is set by a signal, without the menu.
@@ -129,8 +164,7 @@ fn stop_on_signal(stop: &'static AtomicBool, quit: &'static AtomicBool) {
 
 /// Open the portal dialog in a thread: the menu keeps answering, the cast goes on meanwhile.
 /// Once a screen is chosen, the running cast restarts on it.
-fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
-    let out = Out::Menu(menu.current_sender());
+pub(super) fn pick_screen(out: Out, screen: &Arc<Mutex<Option<Arc<ScreenCast>>>>) {
     let slot = Arc::clone(screen);
     std::thread::spawn(move || {
         out.say("Choose the screen in the dialog...");
@@ -138,7 +172,7 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
             Ok(opened) => {
                 // A refused pointer is in the note.
                 let said = opened.note().unwrap_or_else(|| "Screen and pointer granted.".to_string());
-                *slot.lock().unwrap() = Arc::new(opened);
+                *slot.lock().unwrap() = Some(Arc::new(opened));
                 out.say(&said);
                 out.send(menu::Status::ScreenPicked);
             }
@@ -149,7 +183,7 @@ fn pick_screen(menu: &menu::Menu, screen: &Arc<Mutex<Arc<ScreenCast>>>) {
 }
 
 /// Wait for `thread`, at most 15 s: the panel can stop answering.
-fn wait_for<T>(thread: &JoinHandle<T>) {
+pub(super) fn wait_for<T>(thread: &JoinHandle<T>) {
     let started = Instant::now();
     while !thread.is_finished() && started.elapsed() < Duration::from_secs(15) {
         std::thread::sleep(Duration::from_millis(50));

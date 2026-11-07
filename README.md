@@ -66,6 +66,7 @@ sbcast cast --device "Room 104"   # name or id from `sbcast list`
 sbcast cast --pin 0A1B2C          # panel by the code it shows
 sbcast cast --host 10.0.0.7:7385  # panel by its address and command port
 sbcast pin 0A1B2C                 # the address a code gives, without connecting
+sbcast tray                       # icon in the notification area
 ```
 
 ![The sbcast menu during a cast](media/menu.png)
@@ -83,6 +84,17 @@ have to allow the cast on the panel: the menu counts down 90 s. `c` casts
 to a panel by its code alone, `s` stops, `p` chooses another screen and
 moves the running cast to it, `f` freezes the panel's image with "Freeze" in
 a corner (`f` again goes live; a new cast starts live), `q` or Ctrl+C quits.
+
+`sbcast tray` puts an icon in the desktop's notification area; the `.deb`
+starts it with every session (System Settings > Autostart turns that off).
+Its menu lists the panels and casts to the one clicked, after asking for the
+code it shows (empty if none). It also casts by code, stops, freezes, chooses
+another screen, sets the preset and opens the terminal menu. A red dot marks a
+running cast; errors show as notifications. The screen dialogs come back at
+each cast: the screen is shared only while a cast runs. The options below,
+except `--device`, `--pin` and `--host`, apply to the tray too. Its log is
+`$XDG_RUNTIME_DIR/sbcast-tray.log`. The code box and the notifications use
+`kdialog`.
 
 | Option | Default | Effect |
 |---|---|---|

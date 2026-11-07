@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=sbcast
+GenericName=Cast to an interactive panel
+Comment=Cast the screen to an interactive panel from the notification area
+Exec=sbcast tray
+Icon=sbcast
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=cast;screen;panel;screenshare;
