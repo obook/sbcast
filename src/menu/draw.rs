@@ -136,7 +136,10 @@ impl Menu {
         // Short words: the whole line, q included, must fit in 80 columns.
         let mut keys = vec![("↑↓", "move"), ("←→", "set"), ("Tab", "pane"), ("r", "scan"), ("p", "screen"), ("c", "code"), ("↵", "cast")];
         if self.casting.is_some() {
-            keys.push(("s", "stop"));
+            // r still works: its place goes to f, the list refreshes by itself anyway.
+            keys.retain(|(key, _)| *key != "r");
+            let frozen = crate::capture::FREEZE.load(std::sync::atomic::Ordering::SeqCst);
+            keys.extend([("s", "stop"), ("f", if frozen { "live" } else { "freeze" })]);
         }
         keys.push(("q", "quit"));
         let help: Vec<Span> = keys

@@ -1,6 +1,7 @@
 //! menu_loop.rs
 //! Run the menu: each Enter starts a cast in a thread while the menu stays on screen;
 //! s stops it, q quits, p picks the screen again and moves the running cast to it.
+//! f (freeze) is handled in the menu itself: the cast goes on, with the same image.
 //!
 //! Author: O. Booklage
 //! Date: October 2026

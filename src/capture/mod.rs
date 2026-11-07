@@ -11,8 +11,8 @@ mod encode;
 mod input;
 mod portal;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context};
 use gstreamer as gst;
@@ -21,6 +21,11 @@ use gstreamer::prelude::*;
 use crate::cli::Stream;
 pub use input::Input;
 pub use portal::ScreenCast;
+
+/// Set by `f` in the menu: the panel keeps showing the same image, marked "Freeze".
+pub static FREEZE: AtomicBool = AtomicBool::new(false);
+/// The image shown while frozen. Not per capture: a reconnection must not show the live screen.
+static FROZEN_FRAME: Mutex<Option<gst::Buffer>> = Mutex::new(None);
 
 /// Running capture pipeline, feeding appsinks. Dropping it stops the pipeline. The portal
 /// session outlives it, so a new capture can start on the same screen without asking again.
@@ -65,6 +70,10 @@ impl Capture {
             });
         }
 
+        if let Some(overlay) = bin.by_name("freeze") {
+            freeze_on_demand(&overlay)?;
+        }
+
         pipeline.set_state(gst::State::Playing)?;
         tracing::info!("capture started");
         set_audio_delay(&pipeline, audio_delay_ms);
@@ -107,12 +116,13 @@ fn set_audio_delay(pipeline: &gst::Element, ms: i64) {
 /// First element sbcast needs that GStreamer lacks, with its package. The .deb pulls them all
 /// in; a build from source may miss one (x264enc is not in the default plugins).
 fn missing_plugin() -> Option<(&'static str, &'static str)> {
-    const NEEDED: [(&str, &str); 5] = [
+    const NEEDED: [(&str, &str); 6] = [
         ("x264enc", "gstreamer1.0-plugins-ugly"),
         ("pipewiresrc", "gstreamer1.0-pipewire"),
         ("pulsesrc", "gstreamer1.0-plugins-good"),
         ("avenc_aac", "gstreamer1.0-libav"),
         ("appsink", "gstreamer1.0-plugins-base"),
+        ("textoverlay", "gstreamer1.0-x"),
     ];
     NEEDED.into_iter().find(|(element, _)| gst::ElementFactory::find(element).is_none())
 }
@@ -142,4 +152,79 @@ fn restamp_on_arrival(src: &gst::Element, pipeline: &gst::Element) -> anyhow::Re
         gst::PadProbeReturn::Ok
     });
     Ok(())
+}
+
+/// Repeat one frame while `FREEZE` is set, and show the overlay's text on it.
+fn freeze_on_demand(overlay: &gst::Element) -> anyhow::Result<()> {
+    let pad = overlay.static_pad("video_sink").context("overlay has no video pad")?;
+    let overlay = overlay.downgrade();
+    pad.add_probe(gst::PadProbeType::BUFFER, move |_, info| {
+        let frozen = FREEZE.load(Ordering::Relaxed);
+        if let Some(gst::PadProbeData::Buffer(buffer)) = &mut info.data {
+            freeze(frozen, &mut FROZEN_FRAME.lock().unwrap(), buffer);
+        }
+        if let Some(overlay) = overlay.upgrade() {
+            overlay.set_property("silent", !frozen);
+        }
+        gst::PadProbeReturn::Ok
+    });
+    Ok(())
+}
+
+/// While `frozen`, replace `buffer` with the frame in `kept`, the first frozen one, keeping
+/// the timestamps of `buffer`. A frame of another size cannot go to the encoder: it is kept instead.
+fn freeze(frozen: bool, kept: &mut Option<gst::Buffer>, buffer: &mut gst::Buffer) {
+    if !frozen {
+        *kept = None;
+        return;
+    }
+    match kept.as_ref().filter(|frame| frame.size() == buffer.size()) {
+        Some(frame) => {
+            // Shares the memory: the overlay copies it before writing, so `kept` stays clean.
+            let mut frame = frame.copy();
+            let stamped = frame.make_mut();
+            stamped.set_pts(buffer.pts());
+            stamped.set_dts(buffer.dts());
+            stamped.set_duration(buffer.duration());
+            *buffer = frame;
+        }
+        // A copy of its own: pool buffers go back to their pool.
+        None => *kept = buffer.copy_deep().ok(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn freeze_repeats_the_first_frozen_frame() {
+        gst::init().unwrap();
+        let frame = |byte: u8, pts: u64| {
+            let mut buffer = gst::Buffer::from_slice(vec![byte; 6]);
+            buffer.make_mut().set_pts(gst::ClockTime::from_mseconds(pts));
+            buffer
+        };
+        let bytes = |buffer: &gst::Buffer| buffer.map_readable().unwrap().to_vec();
+        let mut kept = None;
+
+        let mut live = frame(1, 0);
+        freeze(false, &mut kept, &mut live);
+        assert_eq!((bytes(&live), kept.is_none()), (vec![1; 6], true));
+
+        // The first frozen frame is kept, then shown with the next timestamps.
+        let mut first = frame(2, 33);
+        freeze(true, &mut kept, &mut first);
+        assert_eq!(bytes(&first), vec![2; 6]);
+        let mut next = frame(3, 66);
+        freeze(true, &mut kept, &mut next);
+        assert_eq!((bytes(&next), next.pts()), (vec![2; 6], Some(gst::ClockTime::from_mseconds(66))));
+
+        // Another size replaces the kept frame; live again forgets it.
+        let mut bigger = gst::Buffer::from_slice(vec![4u8; 8]);
+        freeze(true, &mut kept, &mut bigger);
+        assert_eq!(kept.as_ref().map(|frame| frame.size()), Some(8));
+        freeze(false, &mut kept, &mut frame(5, 99));
+        assert!(kept.is_none());
+    }
 }

@@ -163,10 +163,11 @@ impl Menu {
         }
     }
 
-    /// Mark the panel being cast to; a new cast starts new stats.
+    /// Mark the panel being cast to; a new cast starts new stats, live.
     pub fn set_casting(&mut self, id: Option<String>) {
         if id.is_some() {
             self.live = Live::starting();
+            crate::capture::FREEZE.store(false, Ordering::SeqCst);
         }
         self.casting = id;
     }
@@ -308,6 +309,11 @@ impl Menu {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(Action::Quit),
                 KeyCode::Char('s') if self.casting.is_some() => return Ok(Action::Stop),
                 KeyCode::Char('p') => return Ok(Action::PickScreen),
+                KeyCode::Char('f') if self.casting.is_some() => {
+                    let frozen = !crate::capture::FREEZE.fetch_xor(true, Ordering::SeqCst);
+                    let said = if frozen { "Frozen: the panel keeps this image (f: live again)" } else { "Live again" };
+                    self.status = Status::Info(said.into());
+                }
                 KeyCode::Char('c') => {
                     self.status = Status::Info(code::prompt(None, ""));
                     self.code_entry = Some((None, String::new()));
