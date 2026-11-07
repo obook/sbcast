@@ -67,7 +67,7 @@ pub fn run_tray(mut settings: menu::Settings) -> anyhow::Result<()> {
                     }
                 }
                 Action::Stop => stop(&mut running, &mut menu),
-                Action::Freeze => drop(crate::capture::FREEZE.fetch_xor(true, Ordering::SeqCst)),
+                Action::Freeze => toggle_freeze(),
                 Action::PickScreen => pick_screen(Out::Menu(menu.current_sender()), &screen),
                 Action::Preset(i) => (_, settings.stream.resolution, settings.stream.bitrate) = menu::PRESETS[i],
                 Action::TerminalMenu => terminal_menu(),
@@ -140,6 +140,19 @@ fn ask_code(panel: Option<CastDevice>, s: &menu::Settings, tx: &Sender<Action>) 
             let _ = tx.send(Action::Coded(panel, code));
         }
     });
+}
+
+/// Go live, or freeze once the tray menu has closed: the frozen image must not show it.
+fn toggle_freeze() {
+    // Time for the menu to fade out, with a margin.
+    const MENU_CLOSED: Duration = Duration::from_millis(500);
+    // shortcut: a cast started within this delay starts frozen, check a cast counter if that matters.
+    if !crate::capture::FREEZE.swap(false, Ordering::SeqCst) {
+        std::thread::spawn(|| {
+            std::thread::sleep(MENU_CLOSED);
+            crate::capture::FREEZE.store(true, Ordering::SeqCst);
+        });
+    }
 }
 
 /// Open the terminal menu in Konsole.
