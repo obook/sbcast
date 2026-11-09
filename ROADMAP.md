@@ -36,7 +36,7 @@ Done:
 
 To do:
 
-- [ ] Sound
+- [ ] Sound on EShare panels: sent as AAC-LC over RTP/UDP (format read from the official client capture, which uses AAC-ELD), untested on a panel. If silent, encode ELD with libfdk-aac
 - [ ] Reconnect after a loss
 - [ ] Make writing follow the pen with touch back. Room B22 (panel COL-B22, formerly COL-A22, 10.116.11.20), 2026-11-04, writing in OpenBoard:
   - Writing at normal speed leaves holes, and small curves come out straight. Very slow writing leaves fewer holes. The panel's own writing app has no holes: the sensor is fine

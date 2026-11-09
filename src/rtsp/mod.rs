@@ -7,7 +7,7 @@
 //!   51040  RTSP: DESCRIBE, SETUP video then sound, OPTIONS each second;
 //!   video  the port the video SETUP gives: H.264 packets (wire.rs);
 //!   52020  the touches, once the cast is accepted.
-//! No sound yet.
+//! sound  UDP to the port the sound SETUP gives: RTP packets, one AAC-LC frame each (wire.rs).
 //!
 //! Author: O. Booklage
 //! Date: November 2026
@@ -43,6 +43,31 @@ const TOUCH_SCREEN: (f64, f64) = (1920.0, 1080.0);
 /// Accepted on the panel; 2 means refused, or the dialog closed unanswered.
 const ACCEPTED: i64 = 1;
 
+/// Send the sound of appsink "asink" to the panel's UDP `port` until `ended`. A lost packet
+/// is a click, not a lost cast: send errors are ignored.
+fn send_sound(capture: &Capture, panel: SocketAddr, ended: &'static AtomicBool) -> anyhow::Result<std::thread::JoinHandle<()>> {
+    use gstreamer::prelude::*;
+    let sink = capture.element("asink").context("no asink in the pipeline")?;
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0")?;
+    socket.connect(panel)?;
+    let started = Instant::now();
+    Ok(std::thread::spawn(move || {
+        let mut seq = 0u16;
+        while !ended.load(Ordering::SeqCst) {
+            let Some(sample) = sink.emit_by_name::<Option<gstreamer::Sample>>("try-pull-sample", &[&50_000_000u64]) else {
+                if sink.property::<bool>("eos") {
+                    break;
+                }
+                continue;
+            };
+            let Some(Ok(map)) = sample.buffer().map(|b| b.map_readable()) else { continue };
+            let Some(au) = wire::raw_aac(&map) else { continue };
+            let _ = socket.send(&wire::audio_packet(seq, au, started.elapsed()));
+            seq = seq.wrapping_add(1);
+        }
+    }))
+}
+
 /// Cast `screen` to the RTSP panel `device` until `stop` or the panel's end of the cast.
 // ponytail: no reconnection after a loss, unlike screenshare/; add it if the school Wi-Fi cuts casts.
 pub fn cast(device: &CastDevice, s: &Settings, screen: &ScreenCast, stop: &'static AtomicBool, out: &Out) -> anyhow::Result<()> {
@@ -58,20 +83,21 @@ pub fn cast(device: &CastDevice, s: &Settings, screen: &ScreenCast, stop: &'stat
     rtsp.request("DESCRIBE", &[])?;
     let (_, body) = rtsp.request("SETUP", &wire::video_setup(&s.name))?;
     let data_port = wire::data_port(&body).context("no video port in the panel's SETUP answer")?;
-    rtsp.request("SETUP", &wire::audio_setup())?;
+    let (_, body) = rtsp.request("SETUP", &wire::audio_setup())?;
+    let sound_port = wire::data_port(&body).context("no sound port in the panel's SETUP answer")?;
 
-    // No sound yet: a sound branch nobody reads would only fill up. The video keeps the
-    // screen's shape, as the official client does: with black bands, the touches landed off
+    // The video keeps the screen's shape, as the official client does: with black bands, the touches landed off
     // toward the edges (a 16:10 PC, 2026-11-02).
     let resolution = screen.input().map_or(s.stream.resolution, |input| fit(input.size, s.stream.resolution));
-    let stream = crate::cli::Stream { no_audio: true, resolution, ..s.stream.clone() };
-    let capture = Capture::start(screen, &stream, 0)?;
+    let stream = crate::cli::Stream { resolution, ..s.stream.clone() };
+    let capture = Capture::start(screen, &stream, s.audio_delay)?;
     let encoder = capture.element("venc").context("no encoder in the pipeline")?;
     // ponytail: leaks one flag per cast (a byte): the threads want a 'static flag.
     let ended: &'static AtomicBool = Box::leak(Box::new(AtomicBool::new(false)));
     let link = Link::default();
     let video = media::connect(SocketAddr::new(ip, data_port), data_port)?;
     let sender = send_frames(&capture, "sink", video, Framing::Rtsp, stream.bitrate, &link, ended)?;
+    let sound = if stream.no_audio { None } else { Some(send_sound(&capture, SocketAddr::new(ip, sound_port), ended)?) };
     show_stats(&capture, &link, out);
     if let Some(input) = screen.input() {
         follow_touches(ip, input, ended)?;
@@ -98,6 +124,9 @@ pub fn cast(device: &CastDevice, s: &Settings, screen: &ScreenCast, stop: &'stat
     };
     ended.store(true, Ordering::SeqCst);
     let _ = sender.join();
+    if let Some(sound) = sound {
+        let _ = sound.join();
+    }
     // Say goodbye: without it the panel keeps waiting about 15 s before its menu comes back.
     if lost.is_none() {
         let _ = rtsp.request("TEARDOWN", &[]);
