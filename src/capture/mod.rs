@@ -24,6 +24,20 @@ pub use portal::ScreenCast;
 
 /// Set by `f` in the menu: the panel keeps showing the same image, marked "Freeze".
 pub static FREEZE: AtomicBool = AtomicBool::new(false);
+/// Go live at once, or freeze after `FREEZE_DELAY`: time to put the menu away, the frozen image must not show it.
+/// Returns true when a freeze is on its way.
+// shortcut: a cast started within this delay starts frozen, check a cast counter if that matters.
+pub fn toggle_freeze() -> bool {
+    const FREEZE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+    if FREEZE.swap(false, Ordering::SeqCst) {
+        return false;
+    }
+    std::thread::spawn(|| {
+        std::thread::sleep(FREEZE_DELAY);
+        FREEZE.store(true, Ordering::SeqCst);
+    });
+    true
+}
 /// The image shown while frozen. Not per capture: a reconnection must not show the live screen.
 static FROZEN_FRAME: Mutex<Option<gst::Buffer>> = Mutex::new(None);
 
