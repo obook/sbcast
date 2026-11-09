@@ -113,6 +113,7 @@ fn view(menu: &menu::Menu, s: &menu::Settings) -> tray::View {
         // Not the menu's "Choose a panel, then Enter".
         _ => "Not casting".to_string(),
     };
+    let status = crate::capture::freeze_countdown().map_or(status, |n| format!("Freezing in {n} s"));
     tray::View {
         panels: menu.panels(),
         casting: menu.casting().map(str::to_string),

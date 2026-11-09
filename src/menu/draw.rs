@@ -46,7 +46,9 @@ impl Menu {
             Span::raw("  "),
             Span::styled("screen & sound to interactive panels", Style::new().fg(Color::Gray).italic()),
         ]);
+        let countdown = crate::capture::freeze_countdown().map(|n| format!("Freezing in {n} s (f: cancel)"));
         let (text, color) = match &self.status {
+            _ if countdown.is_some() => (countdown.as_deref().unwrap_or_default(), Color::LightBlue),
             // While frozen: light blue, like ice, and used nowhere else in the menu.
             Status::Info(m) if self.casting.is_some() && crate::capture::FREEZE.load(std::sync::atomic::Ordering::SeqCst) => {
                 (m.as_str(), Color::LightBlue)

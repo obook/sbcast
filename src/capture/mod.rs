@@ -24,20 +24,36 @@ pub use portal::ScreenCast;
 
 /// Set by `f` in the menu: the panel keeps showing the same image, marked "Freeze".
 pub static FREEZE: AtomicBool = AtomicBool::new(false);
-/// Go live at once, or freeze after `FREEZE_DELAY`: time to put the menu away, the frozen image must not show it.
-/// Returns true when a freeze is on its way.
+/// When the pending freeze starts, if one is on its way.
+static FREEZE_DUE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+/// Go live at once, or freeze after 3 s: time to put the menu away, the frozen image must not show it.
+/// Pressed again during the wait, it cancels. Returns true when a freeze is on its way.
 // shortcut: a cast started within this delay starts frozen, check a cast counter if that matters.
 pub fn toggle_freeze() -> bool {
     const FREEZE_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
-    if FREEZE.swap(false, Ordering::SeqCst) {
+    let mut due = FREEZE_DUE.lock().unwrap();
+    if FREEZE.swap(false, Ordering::SeqCst) || due.take().is_some() {
         return false;
     }
-    std::thread::spawn(|| {
+    let at = std::time::Instant::now() + FREEZE_DELAY;
+    *due = Some(at);
+    std::thread::spawn(move || {
         std::thread::sleep(FREEZE_DELAY);
-        FREEZE.store(true, Ordering::SeqCst);
+        let mut due = FREEZE_DUE.lock().unwrap();
+        if *due == Some(at) {
+            *due = None;
+            FREEZE.store(true, Ordering::SeqCst);
+        }
     });
     true
 }
+
+/// Whole seconds left before the freeze starts (3, 2, 1), None when none is pending.
+pub fn freeze_countdown() -> Option<u64> {
+    let due = (*FREEZE_DUE.lock().unwrap())?;
+    Some(due.saturating_duration_since(std::time::Instant::now()).as_secs_f64().ceil() as u64)
+}
+
 /// The image shown while frozen. Not per capture: a reconnection must not show the live screen.
 static FROZEN_FRAME: Mutex<Option<gst::Buffer>> = Mutex::new(None);
 
