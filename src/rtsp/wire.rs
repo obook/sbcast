@@ -78,10 +78,33 @@ pub fn video_setup(name: &str) -> Vec<u8> {
     binary(streams(stream))
 }
 
-/// SETUP body of the sound stream (type 96). sbcast sends no sound yet, but the official
-/// client always sets it up.
+/// AirPlay audio format asked of the panel: AAC-LC, 44.1 kHz, stereo. The official client
+/// sends AAC-ELD (16_777_216), which GStreamer's fdkaacenc cannot encode.
+// ponytail: AAC-LC untested on a panel; if it stays silent, try ELD through libfdk-aac.
+const AUDIO_FORMAT: u32 = 0x40_0000;
+
+/// SETUP body of the sound stream (type 96).
 pub fn audio_setup() -> Vec<u8> {
-    binary(streams(Dictionary::from_iter([("type", Value::from(96)), ("audioFormat", Value::from(16_777_216))])))
+    binary(streams(Dictionary::from_iter([("type", Value::from(96)), ("audioFormat", Value::from(AUDIO_FORMAT))])))
+}
+
+/// One sound packet, as captured from the official client: RTP header (version 2, payload
+/// type 96, sequence, clock in ms) with the audio format where the SSRC goes, then one raw
+/// AAC frame.
+pub fn audio_packet(seq: u16, au: &[u8], elapsed: Duration) -> Vec<u8> {
+    let clock = ((CLOCK_START + elapsed.as_secs_f64()) * 1000.0) as u32;
+    let mut packet = vec![0x80, 96];
+    packet.extend(seq.to_be_bytes());
+    packet.extend(clock.to_be_bytes());
+    packet.extend(AUDIO_FORMAT.to_be_bytes());
+    packet.extend_from_slice(au);
+    packet
+}
+
+/// The raw AAC frame of an ADTS one: the header takes 7 bytes, 9 with a CRC.
+pub fn raw_aac(adts: &[u8]) -> Option<&[u8]> {
+    let header = if *adts.get(1)? & 1 == 1 { 7 } else { 9 };
+    adts.get(header..)
 }
 
 /// Port the panel gives for the video, in its answer to the video SETUP.
@@ -175,6 +198,17 @@ mod tests {
         assert_eq!(&packets[1][4..6], &[0x01, 0x01]);
         assert_eq!(u64::from_le_bytes(packets[1][8..16].try_into().unwrap()) >> 31, 20_001);
         assert_eq!(video_packets(&[picture], Duration::ZERO).len(), 1);
+    }
+
+    #[test]
+    fn wraps_sound_as_captured() {
+        // Captured header: seq 0, clock 9,996,983 ms, format 01 00 00 00 (ELD there).
+        let packet = audio_packet(1, &[0x21, 0x10], Duration::from_millis(500));
+        assert_eq!(&packet[..4], &[0x80, 0x60, 0, 1]);
+        assert_eq!(u32::from_be_bytes(packet[4..8].try_into().unwrap()), 10_000_500);
+        assert_eq!(&packet[12..], &[0x21, 0x10]);
+        assert_eq!(raw_aac(&[0xff, 0xf1, 0, 0, 0, 0, 0, 0x21]), Some(&[0x21][..]));
+        assert_eq!(raw_aac(&[0xff, 0xf0, 0, 0, 0, 0, 0, 0, 0, 0x21]), Some(&[0x21][..]));
     }
 
     #[test]
