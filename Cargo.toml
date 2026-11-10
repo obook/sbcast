@@ -43,7 +43,7 @@ maintainer = "Olivier Booklage <olivier.booklage@ac-bordeaux.fr>"
 section = "video"
 depends = "$auto, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, gstreamer1.0-pipewire, gstreamer1.0-x, xdg-desktop-portal"
 # kdialog: the tray's code box and notifications. libfdk-aac2: the sound of the RTSP panels
-# (loaded when a cast starts, and non-free: without it they cast without sound).
+# (loaded when a cast starts: without it they cast without sound).
 recommends = "pipewire-pulse, kdialog, libfdk-aac2"
 extended-description = "sbcast casts the screen and sound of a Wayland desktop to an interactive panel, and lets the panel's touches drive the PC's pointer."
 assets = [

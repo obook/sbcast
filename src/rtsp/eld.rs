@@ -3,8 +3,8 @@
 //! 44.1 kHz, stereo, 480 samples a frame, and only crackle on AAC-LC (room B22, 2026-11-10).
 //! GStreamer's fdkaacenc does LC only, so this calls libfdk-aac itself, with the settings the
 //! official client gives it (read from its binary and its capture).
-//! The library is loaded when a cast starts: it is non-free (libfdk-aac2 on Debian and Ubuntu),
-//! so the .deb only recommends it and a PC without it casts without sound.
+//! The library is loaded when a cast starts, so the .deb only recommends it (libfdk-aac2) and a
+//! PC without it casts without sound. So does a build without ELD: the setup fails.
 //!
 //! Author: O. Booklage
 //! Date: November 2026

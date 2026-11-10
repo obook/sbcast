@@ -22,9 +22,9 @@ and drive its pointer (touchback).
   sbcast find the panels; without it, use the code shown on the panel.
 - `kdialog`, for the tray's code box and notifications; the `.deb`
   recommends it.
-- `libfdk-aac2` (non-free, `multiverse` on Ubuntu), for the sound of the
-  RTSP panels, which only play AAC-ELD; the `.deb` recommends it. Without
-  it, those panels get the image and no sound.
+- `libfdk-aac2`, for the sound of the RTSP panels, which only play
+  AAC-ELD; the `.deb` recommends it (`universe` on Ubuntu 24.04, not
+  checked on Debian). Without it, those panels get the image and no sound.
 
 ## Install
 
