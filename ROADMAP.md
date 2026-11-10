@@ -37,7 +37,7 @@ Done:
 
 To do:
 
-- [ ] Drop libfdk-aac, which is non-free: the panels' sound needs it for now (AAC-ELD). AAC-LC and PCM in both byte orders failed on COL-B22, so the way out is untried: other `audioFormat` values in the sound SETUP (ALAC), or an ELD encoder under a free licence
+- [ ] Drop libfdk-aac: the panels' sound needs it for now (AAC-ELD). Its license grants no patent rights, and a distribution may ship a build without ELD. AAC-LC and PCM in both byte orders failed on COL-B22, so the way out is untried: other `audioFormat` values in the sound SETUP (ALAC), or an ELD encoder under a free licence
 - [ ] Reconnect after a loss
 - [ ] Make writing follow the pen with touch back. Room B22 (panel COL-B22, formerly COL-A22, 10.116.11.20), 2026-11-04, writing in OpenBoard:
   - Writing at normal speed leaves holes, and small curves come out straight. Very slow writing leaves fewer holes. The panel's own writing app has no holes: the sensor is fine
