@@ -27,7 +27,7 @@ pub fn describe(screen: &ScreenCast, stream: &Stream) -> String {
     let mut description = format!("{source} ! videoconvert ! videoscale ! {}", video_encode(stream));
     if !stream.no_audio {
         // Monitor of the default output: what the PC is playing. Works with pipewire-pulse.
-        description.push_str(&format!(" pulsesrc name=asrc device=@DEFAULT_MONITOR@ ! {}", audio_encode()));
+        description.push_str(&format!(" pulsesrc name=asrc device=@DEFAULT_MONITOR@ ! {}", audio_encode(stream.raw_audio)));
     }
     description
 }
@@ -55,11 +55,18 @@ fn video_encode(stream: &Stream) -> String {
     )
 }
 
-/// AAC at 44.1 kHz with ADTS headers, as the panel expects. The queue holds the sound while
-/// asink waits for its date (positive audio delay, up to 1.5 s), so pulsesrc never blocks.
-fn audio_encode() -> &'static str {
-    "audioconvert ! audioresample ! audio/x-raw,rate=44100,channels=2 \
-     ! avenc_aac bitrate=128000 ! aacparse ! audio/mpeg,stream-format=adts \
-     ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000 \
-     ! appsink name=asink sync=false max-buffers=20"
+/// Sound at 44.1 kHz, stereo. `raw`: 16-bit PCM, for the encoder of rtsp/; else AAC with ADTS
+/// headers, as the other panels expect. The queue holds the sound while asink waits for its date
+/// (positive audio delay, up to 1.5 s), so pulsesrc never blocks.
+fn audio_encode(raw: bool) -> String {
+    let format = if raw {
+        "audio/x-raw,format=S16LE,layout=interleaved,rate=44100,channels=2"
+    } else {
+        "audio/x-raw,rate=44100,channels=2 ! avenc_aac bitrate=128000 ! aacparse ! audio/mpeg,stream-format=adts"
+    };
+    format!(
+        "audioconvert ! audioresample ! {format} \
+         ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000 \
+         ! appsink name=asink sync=false max-buffers=20"
+    )
 }

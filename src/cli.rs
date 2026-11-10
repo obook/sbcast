@@ -81,6 +81,9 @@ pub struct Stream {
     /// No sound.
     #[arg(long)]
     pub no_audio: bool,
+    /// Sound as 16-bit PCM for rtsp/'s own encoder, not AAC with ADTS headers. Set by the code.
+    #[arg(skip)]
+    pub raw_audio: bool,
 }
 
 fn parse_resolution(s: &str) -> Result<(u32, u32), String> {

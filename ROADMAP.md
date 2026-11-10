@@ -33,10 +33,10 @@ Done:
 - [x] Forget a panel silent for 3 weeks
 - [x] Cast with touch back (Connection: Accept). On COL-A22, image and pointer are right but writing lags. In room C22 (2026-11-04), the cast works very well (pen not tested)
 - [x] Cast to the code receiver on port 7385 (Connection: Code): image only
+- [x] Sound on EShare panels: AAC-ELD over RTP/UDP through libfdk-aac (`src/rtsp/eld.rs`), as the official client does. AAC-LC and PCM only gave crackles and noise; ELD plays clean (room B22, 2026-11-10)
 
 To do:
 
-- [ ] Sound on EShare panels: sent as AAC-LC over RTP/UDP (format read from the official client capture, which uses AAC-ELD), untested on a panel. If silent, encode ELD with libfdk-aac
 - [ ] Reconnect after a loss
 - [ ] Make writing follow the pen with touch back. Room B22 (panel COL-B22, formerly COL-A22, 10.116.11.20), 2026-11-04, writing in OpenBoard:
   - Writing at normal speed leaves holes, and small curves come out straight. Very slow writing leaves fewer holes. The panel's own writing app has no holes: the sensor is fine
