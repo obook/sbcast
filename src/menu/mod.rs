@@ -179,7 +179,7 @@ impl Menu {
     }
 
     /// Browse in a thread; devices show up as they answer.
-    fn scan(&mut self) {
+    pub fn scan(&mut self) {
         self.scanning = true;
         // Devices gone since the last scan (unplugged, new address) must not stay listed, except
         // the remembered ones: a busy network may hide panels that are there.
@@ -219,6 +219,14 @@ impl Menu {
             }
             let _ = mdns.shutdown();
         });
+    }
+
+    /// Forget the listed panels that did not answer since the last scan, in the list and in
+    /// the panels file. They come back on their next answer.
+    pub fn forget_silent(&mut self) {
+        let silent: Vec<String> = self.devices.keys().filter(|id| !self.answered.contains(*id)).cloned().collect();
+        self.devices.retain(|id, _| !silent.contains(id));
+        discovery::forget(&silent);
     }
 
     /// Devices sorted by name, as listed.
