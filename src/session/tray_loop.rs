@@ -66,6 +66,17 @@ pub fn run_tray(mut settings: menu::Settings) -> anyhow::Result<()> {
                         Err(e) => tray::notify(&e),
                     }
                 }
+                Action::Rescan => menu.scan(),
+                Action::Forget => {
+                    let (count, tx) = (menu.panels().iter().filter(|(_, answered)| !answered).count(), tx.clone());
+                    // In a thread: the icon keeps answering while the box is open.
+                    std::thread::spawn(move || {
+                        if tray::confirm_forget(count) {
+                            let _ = tx.send(Action::Forgotten);
+                        }
+                    });
+                }
+                Action::Forgotten => menu.forget_silent(),
                 Action::Stop => stop(&mut running, &mut menu),
                 Action::Freeze => drop(crate::capture::toggle_freeze()),
                 Action::PickScreen => pick_screen(Out::Menu(menu.current_sender()), &screen),
