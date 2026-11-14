@@ -69,8 +69,12 @@ pub type ByteCounter = Box<dyn Fn() -> u64 + Send>;
 
 pub struct Menu {
     devices: BTreeMap<String, CastDevice>,
-    /// Ids that answered since the last scan; the others come from the panels file only.
+    /// Ids that answered during the last full round or since; the others come from the panels file only.
     answered: HashSet<String>,
+    /// Ids that answered during the round under way, and during the one before: a panel is
+    /// silent once both are over without it.
+    round: HashSet<String>,
+    previous_round: HashSet<String>,
     device: ListState,
     row: ListState,
     on_settings: bool,
@@ -106,6 +110,8 @@ impl Menu {
         Self {
             devices: BTreeMap::new(),
             answered: HashSet::new(),
+            round: HashSet::new(),
+            previous_round: HashSet::new(),
             device: ListState::default().with_selected(Some(0)),
             row: ListState::default().with_selected(Some(0)),
             on_settings: false,
@@ -185,7 +191,8 @@ impl Menu {
         // the remembered ones: a busy network may hide panels that are there.
         self.devices = discovery::remembered().into_iter().map(|d| (d.id.clone(), d)).collect();
         self.answered.clear();
-        let targets: Vec<_> = self.devices.values().map(|d| (d.id.clone(), d.ip)).collect();
+        self.round.clear();
+        self.previous_round.clear();
         if self.browsing {
             // The round under way began before the clear: wait for the next full one.
             self.skip_done = true;
@@ -200,7 +207,9 @@ impl Menu {
                 Err(e) => return tracing::warn!("discovery failed: {e:#}"),
             };
             loop {
-                // A school Wi-Fi drops most mDNS multicast but lets a ping through.
+                // A school Wi-Fi drops most mDNS multicast but lets a ping through. The file is read
+                // each round, for the panels first seen during the previous one.
+                let targets: Vec<_> = discovery::remembered().iter().map(|d| (d.id.clone(), d.ip)).collect();
                 if ping_all(&targets).into_iter().any(|id| tx.send(Found::Alive(id)).is_err()) {
                     break;
                 }
@@ -244,6 +253,7 @@ impl Menu {
                 // Keyed by id: a device answers several times.
                 Found::Device(d) => {
                     self.answered.insert(d.id.clone());
+                    self.round.insert(d.id.clone());
                     discovery::seen(&d);
                     self.devices.insert(d.id.clone(), d);
                 }
@@ -251,10 +261,21 @@ impl Menu {
                     if let Some(d) = self.devices.get(&id) {
                         discovery::seen(d);
                     }
-                    self.answered.insert(id);
+                    self.answered.insert(id.clone());
+                    self.round.insert(id);
                 }
-                Found::Done if self.skip_done => self.skip_done = false,
-                Found::Done => self.scanning = false,
+                // A panel silent for two whole rounds (ping and browse) goes to "not answering".
+                // One lost round is common on a school Wi-Fi: a cut of a few seconds must not gray the list.
+                Found::Done => {
+                    let round = std::mem::take(&mut self.round);
+                    self.answered = round.union(&self.previous_round).cloned().collect();
+                    self.previous_round = round;
+                    if self.skip_done {
+                        self.skip_done = false;
+                    } else {
+                        self.scanning = false;
+                    }
+                }
             }
         }
         while let Ok(status) = self.status_rx.try_recv() {
@@ -397,7 +418,8 @@ fn ping_all(targets: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
     let children: Vec<_> = targets
         .iter()
         .filter_map(|(id, ip)| {
-            let child = Command::new("ping").args(["-c1", "-W1", &ip.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+            // 3 s: a loaded school Wi-Fi answers a ping late, not never.
+            let child = Command::new("ping").args(["-c1", "-W3", &ip.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
             child.ok().map(|c| (id, c))
         })
         .collect();

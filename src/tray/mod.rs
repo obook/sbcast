@@ -53,6 +53,8 @@ pub struct View {
 // Menu icons: PNG drawn from media/menu/*.svg (albert-go's line style), rendered at 32 px with
 // `inkscape x.svg -w 32 -h 32 -o x.png`.
 const ICON_PANEL: &[u8] = include_bytes!("../../media/menu/panel.png");
+/// The same drawing in gray, for a panel not answering.
+const ICON_PANEL_SILENT: &[u8] = include_bytes!("../../media/menu/panel-silent.png");
 const ICON_CODE: &[u8] = include_bytes!("../../media/menu/code.png");
 const ICON_STOP: &[u8] = include_bytes!("../../media/menu/stop.png");
 const ICON_FREEZE: &[u8] = include_bytes!("../../media/menu/freeze.png");
@@ -131,7 +133,7 @@ impl ksni::Tray for Tray {
                     // The menu shows these in dark gray: there before, silent now.
                     label: if *answered { name } else { format!("{name} (not answering)") },
                     checked: self.view.casting.as_deref() == Some(panel.id.as_str()),
-                    icon_data: ICON_PANEL.to_vec(),
+                    icon_data: if *answered { ICON_PANEL.to_vec() } else { ICON_PANEL_SILENT.to_vec() },
                     activate: Box::new(move |t: &mut Self| t.send(Action::Choose(panel.clone()))),
                     ..Default::default()
                 }
