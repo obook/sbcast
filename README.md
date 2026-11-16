@@ -114,7 +114,8 @@ menu also casts by code, sets the preset and opens the terminal menu; during
 a cast, it stops, freezes and chooses another screen. Freeze waits half a
 second for the menu to close, so the frozen image does not show it.
 
-A red dot on the icon marks a running cast; errors show as notifications.
+A red dot on the icon marks a running cast; the icon turns to ice with pause bars while
+the image is frozen. Errors show as notifications.
 The screen dialogs come back at each cast: sbcast shares the screen only
 while a cast runs.
 
