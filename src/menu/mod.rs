@@ -154,6 +154,7 @@ impl Menu {
             Status::Error(_) | Status::Ended => {
                 self.casting = None;
                 self.live.started = None;
+                crate::capture::unfreeze();
                 self.status = status;
             }
         }
