@@ -48,6 +48,12 @@ pub fn toggle_freeze() -> bool {
     true
 }
 
+/// Back to live, with no freeze pending: a cast that ends must not leave the icon frozen.
+pub fn unfreeze() {
+    *FREEZE_DUE.lock().unwrap() = None;
+    FREEZE.store(false, Ordering::SeqCst);
+}
+
 /// Whole seconds left before the freeze starts (3, 2, 1), None when none is pending.
 pub fn freeze_countdown() -> Option<u64> {
     let due = (*FREEZE_DUE.lock().unwrap())?;
