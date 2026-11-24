@@ -50,7 +50,8 @@ assets = [
     ["target/release/sbcast", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/sbcast/", "644"],
     ["media/icon.svg", "usr/share/icons/hicolor/scalable/apps/sbcast.svg", "644"],
-    # The tray: in the application menu, and started with every session.
+    # The tray: in the application menu only, not started with the session.
     ["packaging/sbcast-tray.desktop", "usr/share/applications/", "644"],
-    ["packaging/sbcast-tray.desktop", "etc/xdg/autostart/", "644"],
 ]
+# Removes /etc/xdg/autostart/sbcast-tray.desktop left by 0.7.0 and older: dpkg keeps a dropped conffile.
+maintainer-scripts = "packaging/debian/"

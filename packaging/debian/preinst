@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+# 0.7.0 and older started the tray with every session.
+dpkg-maintscript-helper rm_conffile \
+    /etc/xdg/autostart/sbcast-tray.desktop 0.7.1~ sbcast -- "$@"
