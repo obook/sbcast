@@ -70,7 +70,7 @@ To do:
 
 Done:
 
-- [x] `sbcast tray`: icon in the notification area, started with the session (.deb). Panels, cast by code, stop, freeze, screen, presets, terminal menu
+- [x] `sbcast tray`: icon in the notification area, in the application menu (.deb). Panels, cast by code, stop, freeze, screen, presets, terminal menu
 - [x] The screen is shared only during a cast; errors as KDE notifications (kdialog)
 
 To do:

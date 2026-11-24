@@ -106,7 +106,8 @@ cast starts live), `q` or Ctrl+C quits.
 ## Tray
 
 `sbcast tray` puts an icon in the desktop's notification area. The `.deb`
-starts it with each session; turn that off in System Settings > Autostart.
+adds it to the application menu; to start it with each session, add it in
+System Settings > Autostart.
 
 Its menu lists the panels; click one to cast to it. For some panels, sbcast
 first asks for the code they show (leave it empty if there is none). The
